@@ -67,8 +67,8 @@ class ModeloEnBruto(nn.Module):
 class MetaLearning(FairMethod):
     def __init__(
         self,
-        inner_lr=0.01,
-        inner_steps=1,
+        inner_lr=0.005,
+        inner_steps=5,
         meta_epochs=150,
         meta_lr=3e-4,
         k_support=128,
@@ -115,6 +115,15 @@ class MetaLearning(FairMethod):
     def fit(self, sensitive_labels, **kwargs):
         if not self.datos_cargados:
             raise RuntimeError("No hay datos de entrenamiento cargados")
+
+        # Update loss to handle class imbalance in the training data
+        with torch.no_grad():
+            y = self.y_train
+            pos = torch.sum(y == 1).float()
+            neg = torch.sum(y == 0).float()
+            if pos > 0:
+                pos_weight = (neg / pos).clamp(min=1.0)
+                self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
         if isinstance(sensitive_labels, torch.Tensor):
             self.sensitive_train = sensitive_labels.cpu().numpy()
