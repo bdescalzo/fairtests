@@ -1,10 +1,8 @@
-import argparse
 import os
 import sys
 
 import numpy as np
 import torch
-from folktables import ACSDataSource, ACSIncome
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
@@ -17,38 +15,48 @@ from fair_methods import Baseline, MetaLearning, Reptile
 from examples.results_excel import write_results_xlsx
 
 
+def generate_toy_dataset(n_samples=1000, seed=9845):
+    rng = np.random.default_rng(seed)
+
+    sensitive = rng.choice([0, 1], size=n_samples, p=[0.1, 0.9]).astype(np.int64)
+    labels = rng.integers(0, 2, size=n_samples, dtype=np.int64)
+    features = np.zeros((n_samples, 2), dtype=np.float64)
+
+    mask = (labels == 1) & (sensitive == 1)
+    if np.any(mask):
+        features[mask] = rng.multivariate_normal(
+            mean=[6, 0], cov=[[1, 0], [0, 1]], size=np.sum(mask)
+        )
+
+    mask = (labels == 0) & (sensitive == 1)
+    if np.any(mask):
+        features[mask] = rng.multivariate_normal(
+            mean=[2, 0], cov=[[1, 0], [0, 1]], size=np.sum(mask)
+        )
+
+    mask = (labels == 0) & (sensitive == 0)
+    if np.any(mask):
+        features[mask] = rng.multivariate_normal(
+            mean=[-4, 2], cov=[[2.5, 0], [0, 2.5]], size=np.sum(mask)
+        )
+
+    mask = (labels == 1) & (sensitive == 0)
+    if np.any(mask):
+        features[mask] = rng.multivariate_normal(
+            mean=[-2, 0], cov=[[2.5, 0], [0, 2.5]], size=np.sum(mask)
+        )
+
+    return features, labels, sensitive
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Folktables fairness example")
-    parser.add_argument(
-        "--min-k",
-        type=int,
-        default=2,
-        help="Minimum samples per group to include in training.",
-    )
-    args = parser.parse_args()
-
-    print("[Example] Loading ACS data...")
-    data_source = ACSDataSource(
-        survey_year=2018,
-        horizon="1-Year",
-        survey="person",
-    )
-
-    acs_data = data_source.get_data(
-        states=["AL", "AK", "AZ", "NH", "ME", "SD", "CA", "NY", "TX"],
-        download=True,
-    )
-
-    print("[Example] Preparing dataset...")
-    X, y, group = ACSIncome.df_to_numpy(acs_data)
-
-    # Remove sensitive feature from the input (race is the last feature)
-    X_no_race = np.delete(X, 9, axis=1)
+    print("[Toy Example] Generating toy dataset...")
+    X, y, g = generate_toy_dataset(n_samples=1000, seed=9845)
 
     X_train, X_test, y_train, y_test, g_train, g_test = train_test_split(
-        X_no_race,
+        X,
         y,
-        group,
+        g,
         test_size=0.2,
         random_state=42,
         stratify=y,
@@ -58,7 +66,7 @@ def main():
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    print("[Example] Converting to tensors...")
+    print("[Toy Example] Converting to tensors...")
     X_train_t = torch.tensor(X_train, dtype=torch.float32)
     X_test_t = torch.tensor(X_test, dtype=torch.float32)
     y_train_t = torch.tensor(y_train, dtype=torch.float32)
@@ -68,19 +76,7 @@ def main():
 
     protected_value = int(np.min(g_train))
 
-    if args.min_k > 1:
-        counts = np.bincount(g_train.astype(int))
-        valid_groups = np.where(counts >= args.min_k)[0]
-        valid_mask = np.isin(g_train, valid_groups)
-        X_train_t = X_train_t[valid_mask]
-        y_train_t = y_train_t[valid_mask]
-        g_train_t = g_train_t[valid_mask]
-        print(
-            f"[Example] Filtered training groups with min_k={args.min_k}. "
-            f"Kept {len(valid_groups)} groups."
-        )
-
-    print("[Example] Running fairtests...")
+    print("[Toy Example] Running fairtests...")
     methods = {
         "baseline": Baseline(),
         "maml": MetaLearning(),
@@ -100,11 +96,11 @@ def main():
     output_path = write_results_xlsx(
         results=results,
         output_dir=os.path.dirname(__file__),
-        results_name="folktables_results",
+        results_name="toy_results",
     )
-    print(f"[Example] Writing results to {output_path}")
+    print(f"[Toy Example] Writing results to {output_path}")
 
-    print("[Example] Done.")
+    print("[Toy Example] Done.")
 
     for method_name, payload in results.items():
         print("=" * 72)
