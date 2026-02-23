@@ -12,13 +12,13 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 class Reptile(FairMethod):
     def __init__(
         self,
-        inner_lr=0.01,
-        inner_steps=5,
+        inner_lr=0.005,
+        inner_steps=10,
         meta_epochs=200,
-        meta_lr=0.01,
+        meta_lr=0.003,
         inner_batch_size=128,
         k_support=128,
-        meta_batch_size=1,
+        meta_batch_size=4,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -58,7 +58,7 @@ class Reptile(FairMethod):
         )
 
     def _inner_train(self, model, group_id):
-        optimizer = torch.optim.SGD(model.parameters(), lr=self.inner_lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.inner_lr)
         model.train()
         for _ in range(self.inner_steps):
             Xb, yb = self._sample_group_batch(group_id, self.inner_batch_size)
@@ -73,7 +73,7 @@ class Reptile(FairMethod):
     def _inner_train_on_indices(self, model, indices):
         if indices.size == 0:
             return
-        optimizer = torch.optim.SGD(model.parameters(), lr=self.inner_lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.inner_lr)
         model.train()
         for _ in range(self.inner_steps):
             replace = indices.size < self.inner_batch_size
@@ -90,6 +90,15 @@ class Reptile(FairMethod):
     def fit(self, sensitive_labels, **kwargs):
         if not self.datos_cargados:
             raise RuntimeError("No hay datos de entrenamiento cargados")
+
+        # Update loss to handle class imbalance in the training data
+        with torch.no_grad():
+            y = self.y_train
+            pos = torch.sum(y == 1).float()
+            neg = torch.sum(y == 0).float()
+            if pos > 0:
+                pos_weight = (neg / pos).clamp(min=1.0)
+                self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
         if isinstance(sensitive_labels, torch.Tensor):
             self.sensitive_train = sensitive_labels.cpu().numpy()
