@@ -1,6 +1,37 @@
 from fair_methods import Baseline, MetaLearning, Reptile
 from metrics.metrics import StandardMetrics, FairnessMetrics
 
+AVAILABLE_METHODS = {
+    "baseline": Baseline,
+    "maml": MetaLearning,
+    "reptile": Reptile,
+}
+
+
+def _resolve_methods(methods=None, method_names=None):
+    if methods is not None:
+        return methods
+
+    if method_names is None:
+        selected_names = list(AVAILABLE_METHODS.keys())
+    else:
+        if isinstance(method_names, str):
+            selected_names = [method_names]
+        else:
+            selected_names = list(method_names)
+        selected_names = list(dict.fromkeys(selected_names))
+
+        unknown = [name for name in selected_names if name not in AVAILABLE_METHODS]
+        if unknown:
+            valid = ", ".join(AVAILABLE_METHODS.keys())
+            unknown_str = ", ".join(unknown)
+            raise ValueError(
+                f"Unknown method name(s): {unknown_str}. "
+                f"Valid names are: {valid}"
+            )
+
+    return {name: AVAILABLE_METHODS[name]() for name in selected_names}
+
 
 def run_fairtests(
     X_train,
@@ -12,14 +43,10 @@ def run_fairtests(
     protected_value,
     threshold=0.5,
     methods=None,
+    method_names=None,
 ):
     print("[Fairtest] Starting evaluation pipeline.")
-    if methods is None:
-        methods = {
-            "baseline": Baseline(),
-            "maml": MetaLearning(),
-            "reptile": Reptile(),
-        }
+    methods = _resolve_methods(methods=methods, method_names=method_names)
 
     results = {}
 

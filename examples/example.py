@@ -13,7 +13,6 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from fairtests import run_fairtests
-from fair_methods import Baseline, MetaLearning, Reptile
 from examples.results_excel import write_results_xlsx
 
 
@@ -81,11 +80,6 @@ def main():
         )
 
     print("[Example] Running fairtests...")
-    methods = {
-        "baseline": Baseline(),
-        "maml": MetaLearning(),
-        "reptile": Reptile(),
-    }
     results = run_fairtests(
         X_train_t,
         y_train_t,
@@ -94,7 +88,6 @@ def main():
         g_train_t,
         g_test_t,
         protected_value,
-        methods=methods,
     )
 
     output_path = write_results_xlsx(
