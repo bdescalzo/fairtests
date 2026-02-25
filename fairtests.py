@@ -55,10 +55,7 @@ def run_fairtests(
         method.load_data(X_train, y_train, X_test)
         method.fit(sensitive_train)
 
-        if isinstance(method, MetaLearning) or isinstance(method, Reptile):
-            y_prob = method.predict(sensitive_labels=sensitive_test)
-        else:
-            y_prob = method.predict()
+        y_prob = method.predict(sensitive_labels=sensitive_test)
 
         standard = StandardMetrics(y_test, y_prob, threshold=threshold)
         group_metrics = standard.by_group(sensitive_test)
