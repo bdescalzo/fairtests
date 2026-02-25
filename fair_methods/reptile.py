@@ -1,10 +1,9 @@
 import numpy as np
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from .fair_method import FairMethod
-from .meta import ModeloEnBruto
+from .models import GenericModel
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -109,7 +108,7 @@ class Reptile(FairMethod):
         if unique_groups.size == 0:
             raise ValueError("No hay grupos sensibles para entrenar Reptile")
 
-        self.meta_model = ModeloEnBruto(self.input_dim).to(device)
+        self.meta_model = GenericModel(self.input_dim).to(device)
 
         print(
             f"[Reptile] Meta-training on {unique_groups.size} groups "
@@ -126,7 +125,7 @@ class Reptile(FairMethod):
 
             for group_id in task_ids:
                 # Clone meta-model
-                adapted = ModeloEnBruto(self.input_dim).to(device)
+                adapted = GenericModel(self.input_dim).to(device)
                 adapted.load_state_dict(self.meta_model.state_dict())
 
                 # Inner-loop training on task
@@ -157,7 +156,7 @@ class Reptile(FairMethod):
             replace = idxs.size < self.k_support
             support_idx = np.random.choice(idxs, size=self.k_support, replace=replace)
 
-            adapted = ModeloEnBruto(self.input_dim).to(device)
+            adapted = GenericModel(self.input_dim).to(device)
             adapted.load_state_dict(self.meta_model.state_dict())
 
             self._inner_train_on_indices(adapted, support_idx)
@@ -196,7 +195,7 @@ class Reptile(FairMethod):
                 elif self.group_params.get(g_id) is not None:
                     params = self.group_params[g_id]
                     with torch.no_grad():
-                        logits = self._forward_with_params(X_group, params)
+                        logits = self.meta_model(X_group, params=params)
                         predictions[mask_tensor] = torch.sigmoid(logits)
                 else:
                     with torch.no_grad():
@@ -208,12 +207,3 @@ class Reptile(FairMethod):
                 predictions = torch.sigmoid(logits)
 
         return predictions.unsqueeze(1).cpu().numpy()
-
-    def _forward_with_params(self, x, params):
-        # Re-implement forward using parameter dict for adapted models
-        x = F.linear(x, params["fc1.weight"], params["fc1.bias"])
-        x = F.gelu(x)
-        x = F.linear(x, params["fc2.weight"], params["fc2.bias"])
-        x = F.gelu(x)
-        x = F.linear(x, params["fc3.weight"], params["fc3.bias"])
-        return x.squeeze(-1)

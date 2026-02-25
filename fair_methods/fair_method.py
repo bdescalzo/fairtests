@@ -1,12 +1,15 @@
-class FairMethod:
-    def __init__(self, **kwargs):
-        pass
+from abc import ABC, abstractmethod
 
+
+class FairMethod(ABC):
+    @abstractmethod
     def load_data(self, X_train, y_train, X_test):
-        pass
+        raise NotImplementedError
 
-    def fit(self, sensitive_labels, **kwargs):
-        pass
+    @abstractmethod
+    def fit(self, sensitive_labels=None, **kwargs):
+        raise NotImplementedError
 
-    def predict(self, **kwargs):
-        pass
+    @abstractmethod
+    def predict(self, sensitive_labels=None, **kwargs):
+        raise NotImplementedError

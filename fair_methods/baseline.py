@@ -4,7 +4,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from .fair_method import FairMethod
-from .meta import ModeloEnBruto
+from .models import GenericModel
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -31,7 +31,7 @@ class Baseline(FairMethod):
         if not self.datos_cargados:
             raise RuntimeError("No hay datos de entrenamiento cargados")
 
-        self.model = ModeloEnBruto(self.input_dim).to(device)
+        self.model = GenericModel(self.input_dim).to(device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         dataset = TensorDataset(self.X_train, self.y_train)

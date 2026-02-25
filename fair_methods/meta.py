@@ -1,67 +1,11 @@
 import numpy as np
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from .fair_method import FairMethod
+from .models import GenericModel
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-# Original model (kept for reference)
-# class ModeloEnBruto(nn.Module):
-#     def __init__(self, input_dim):
-#         super().__init__()
-#         self.fc1 = nn.Linear(input_dim, 128)
-#         self.fc2 = nn.Linear(128, 128)
-#         self.fc3 = nn.Linear(128, 1)
-#
-#     def forward(self, x, params=None):
-#         if params is None:
-#             x = F.relu(self.fc1(x))
-#             x = F.relu(self.fc2(x))
-#             x = self.fc3(x)
-#         else:
-#             x = F.linear(x, params["fc1.weight"], params["fc1.bias"])
-#             x = F.relu(x)
-#             x = F.linear(x, params["fc2.weight"], params["fc2.bias"])
-#             x = F.relu(x)
-#             x = F.linear(x, params["fc3.weight"], params["fc3.bias"])
-#         return x.squeeze(-1)
-
-
-class ModeloEnBruto(nn.Module):
-    def __init__(self, input_dim):
-        super().__init__()
-        self.fc1 = nn.Linear(input_dim, 128)
-       # self.ln1 = nn.LayerNorm(128)
-        self.fc2 = nn.Linear(128, 128)
-       # self.ln2 = nn.LayerNorm(128)
-        self.fc3 = nn.Linear(128, 1)
-        #self.dropout = nn.Dropout(p=0.2)
-
-    def forward(self, x, params=None):
-        if params is None:
-            x = self.fc1(x)
-        #    x = self.ln1(x)
-            x = F.gelu(x)
-            #x = self.dropout(x)
-            x = self.fc2(x)
-        #    x = self.ln2(x)
-            x = F.gelu(x)
-            #x = self.dropout(x)
-            x = self.fc3(x)
-        else:
-            x = F.linear(x, params["fc1.weight"], params["fc1.bias"])
-          #  x = F.layer_norm(x, (128,), params["ln1.weight"], params["ln1.bias"])
-            x = F.gelu(x)
-            #x = F.dropout(x, p=0.2, training=self.training)
-            x = F.linear(x, params["fc2.weight"], params["fc2.bias"])
-           # x = F.layer_norm(x, (128,), params["ln2.weight"], params["ln2.bias"])
-            x = F.gelu(x)
-          #  x = F.dropout(x, p=0.2, training=self.training)
-            x = F.linear(x, params["fc3.weight"], params["fc3.bias"])
-        return x.squeeze(-1)
 
 
 class MetaLearning(FairMethod):
@@ -134,7 +78,7 @@ class MetaLearning(FairMethod):
         if unique_groups.size == 0:
             raise ValueError("No hay grupos sensibles para entrenar MAML")
 
-        self.meta_model = ModeloEnBruto(self.input_dim).to(device)
+        self.meta_model = GenericModel(self.input_dim).to(device)
         meta_optimizer = torch.optim.Adam(self.meta_model.parameters(), lr=self.meta_lr)
 
         print(
