@@ -11,3 +11,7 @@ The ```examples\``` folder contains a few usage examples. The package is straigh
 2. Call fairtests' ```run_fairtests``` method with the tensors, the protected label and the list of methods to execute. It will return a dictionary with all the metrics per method (as can be seen in the ```print_toy_example.py``` example).
 
 The ```results_excel.py``` script under examples generates a XLSX file with all the data conveniently formatted in sheets.
+
+## Examples
+
+The ```examples\``` folder contains ```example.py``` (which uses the [folktables](https://github.com/socialfoundations/folktables) dataset), and ```example_toy.py```, which generates a simple two-variable Gaussian distribution.
