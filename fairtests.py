@@ -1,10 +1,11 @@
-from fair_methods import Baseline, MetaLearning, Reptile
+from fair_methods import Baseline, MetaLearning, MinimaxParetoFairness, Reptile
 from metrics.metrics import StandardMetrics, FairnessMetrics
 
 AVAILABLE_METHODS = {
     "baseline": Baseline,
     "maml": MetaLearning,
     "reptile": Reptile,
+    "mmpf": MinimaxParetoFairness,
 }
 
 
