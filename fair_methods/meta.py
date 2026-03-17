@@ -17,6 +17,7 @@ class MetaLearning(FairMethod):
         meta_lr=3e-4,
         k_support=128,
         k_query=128,
+        replace=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -26,6 +27,7 @@ class MetaLearning(FairMethod):
         self.meta_lr = meta_lr
         self.k_support = k_support
         self.k_query = k_query
+        self.replace = replace
 
         self.meta_model = None
         self.group_params = {}
@@ -33,6 +35,8 @@ class MetaLearning(FairMethod):
         self.input_dim = None
         self.sensitive_train = None
         self.loss_fn = nn.BCEWithLogitsLoss()
+        self.effective_k_support = k_support
+        self.effective_k_query = k_query
 
     def load_data(self, X_train, y_train, X_test):
         self.X_train = X_train.float().to(device)
@@ -43,9 +47,12 @@ class MetaLearning(FairMethod):
 
     def _sample_task_batches(self, group_id):
         idxs = np.where(self.sensitive_train == group_id)[0]
-        k_support = self.k_support
-        k_query = self.k_query
-        replace = idxs.size < (k_support + k_query)
+        k_support = self.effective_k_support
+        k_query = self.effective_k_query
+        if self.replace:
+            replace = idxs.size < (k_support + k_query)
+        else:
+            replace = False
         chosen = np.random.choice(idxs, size=k_support + k_query, replace=replace)
         support_idx = chosen[:k_support]
         query_idx = chosen[k_support:]
@@ -55,6 +62,34 @@ class MetaLearning(FairMethod):
         query_x = self.X_train[query_idx]
         query_y = self.y_train[query_idx]
         return support_x, support_y, query_x, query_y
+
+    def _resolve_effective_k(self, unique_groups):
+        self.effective_k_support = int(self.k_support)
+        self.effective_k_query = int(self.k_query)
+
+        if self.replace:
+            return
+
+        counts = [int(np.sum(self.sensitive_train == g_id)) for g_id in unique_groups]
+        min_group_size = int(np.min(counts))
+        if min_group_size < 2:
+            raise ValueError(
+                "replace=False requires at least 2 samples in every sensitive group "
+                "(one for support and one for query)."
+            )
+
+        requested_total = int(self.k_support + self.k_query)
+        if requested_total <= 0:
+            raise ValueError("k_support + k_query must be > 0")
+
+        effective_total = min(requested_total, min_group_size)
+        support_ratio = float(self.k_support) / float(requested_total)
+        effective_k_support = int(round(effective_total * support_ratio))
+        effective_k_support = max(1, min(effective_k_support, effective_total - 1))
+        effective_k_query = effective_total - effective_k_support
+
+        self.effective_k_support = effective_k_support
+        self.effective_k_query = effective_k_query
 
     def fit(self, sensitive_labels, **kwargs):
         if not self.datos_cargados:
@@ -78,6 +113,7 @@ class MetaLearning(FairMethod):
         if unique_groups.size == 0:
             raise ValueError("No hay grupos sensibles para entrenar MAML")
 
+        self._resolve_effective_k(unique_groups)
         self.meta_model = GenericModel(self.input_dim).to(device)
         meta_optimizer = torch.optim.Adam(self.meta_model.parameters(), lr=self.meta_lr)
 
@@ -85,7 +121,8 @@ class MetaLearning(FairMethod):
             f"[MAML] Meta-training on {unique_groups.size} groups "
             f"(epochs={self.meta_epochs}, inner_steps={self.inner_steps}, "
             f"inner_lr={self.inner_lr}, meta_lr={self.meta_lr}, "
-            f"k_support={self.k_support}, k_query={self.k_query})"
+            f"k_support={self.effective_k_support}, k_query={self.effective_k_query}, "
+            f"replace={self.replace})"
         )
         for epoch in range(self.meta_epochs):
             meta_optimizer.zero_grad()
@@ -132,8 +169,13 @@ class MetaLearning(FairMethod):
         self.group_params = {}
         for g_id in unique_groups:
             idxs = np.where(self.sensitive_train == g_id)[0]
-            replace = idxs.size < self.k_support
-            support_idx = np.random.choice(idxs, size=self.k_support, replace=replace)
+            if self.replace:
+                replace = idxs.size < self.effective_k_support
+            else:
+                replace = False
+            support_idx = np.random.choice(
+                idxs, size=self.effective_k_support, replace=replace
+            )
             X_support = self.X_train[support_idx]
             y_support = self.y_train[support_idx]
             adapted_params = {
