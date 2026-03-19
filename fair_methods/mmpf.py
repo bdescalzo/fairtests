@@ -62,6 +62,7 @@ class MinimaxParetoFairness(FairMethod):
         self.balanced_sampler = balanced_sampler
         self.seed = seed
         self.n_print = n_print
+        self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
 
         self.model = None
         self.optimizer = None
@@ -81,9 +82,10 @@ class MinimaxParetoFairness(FairMethod):
         self.sensitive_val_external = None
 
     def load_data(self, X_train, y_train, X_test):
-        self.X_train = X_train.float().to(device)
-        self.y_train = y_train.long().to(device)
-        self.X_test = X_test.float().to(device)
+        # Keep the full dataset on CPU and stream mini-batches to device.
+        self.X_train = X_train.float().cpu()
+        self.y_train = y_train.long().cpu()
+        self.X_test = X_test.float().cpu()
         self.input_dim = self.X_train.shape[1]
         self.datos_cargados = True
 
@@ -130,11 +132,12 @@ class MinimaxParetoFairness(FairMethod):
         y = torch.clamp(y, min=0, max=1)
         return F.one_hot(y, num_classes=2).float()
 
-    def _build_loader(self, X, y_1hot, g_idx, train=False):
+    def _build_loader(self, X, y, g_idx, train=False):
+        y_long = y if y.dtype == torch.long else y.long()
         dataset = TensorDataset(
             X,
-            y_1hot,
-            torch.as_tensor(g_idx, dtype=torch.long, device=device),
+            y_long,
+            torch.as_tensor(g_idx, dtype=torch.long),
         )
         if train and self.balanced_sampler:
             counts = np.bincount(g_idx, minlength=len(self.group_values)).astype(np.float64)
@@ -142,9 +145,19 @@ class MinimaxParetoFairness(FairMethod):
             sample_w = 1.0 / counts[g_idx]
             sample_w = torch.as_tensor(sample_w, dtype=torch.double)
             sampler = WeightedRandomSampler(sample_w, len(sample_w), replacement=True)
-            return DataLoader(dataset, batch_size=self.batch_size, sampler=sampler)
+            return DataLoader(
+                dataset,
+                batch_size=self.batch_size,
+                sampler=sampler,
+                pin_memory=(device == "cuda"),
+            )
 
-        return DataLoader(dataset, batch_size=self.batch_size, shuffle=train)
+        return DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=train,
+            pin_memory=(device == "cuda"),
+        )
 
     def _epoch_linearweight(self, loader, train_type):
         n_groups = len(self.group_values)
@@ -155,7 +168,12 @@ class MinimaxParetoFairness(FairMethod):
         train = train_type == "Train"
         self.model.train(mode=train)
 
-        for x, utility_1hot, sensitive_idx in loader:
+        pin_memory = device == "cuda"
+        for x, y, sensitive_idx in loader:
+            x = x.to(device, non_blocking=pin_memory)
+            y = y.to(device, non_blocking=pin_memory)
+            sensitive_idx = sensitive_idx.to(device, non_blocking=pin_memory)
+            utility_1hot = self._to_one_hot_binary(y)
             if train:
                 self.optimizer.zero_grad()
 
@@ -292,13 +310,13 @@ class MinimaxParetoFairness(FairMethod):
             y_fit = self.y_train
             g_fit = g_train_idx
 
-            X_val_t = X_val.float().to(device)
-            y_val_t = y_val.long().to(device)
+            X_val_t = X_val.float().cpu()
+            y_val_t = y_val.long().cpu()
 
             s_val_np = s_val.detach().cpu().numpy() if isinstance(s_val, torch.Tensor) else np.asarray(s_val)
             g_val, valid = self._encode_existing_groups(s_val_np)
             if not np.all(valid):
-                keep = torch.as_tensor(valid, dtype=torch.bool, device=device)
+                keep = torch.as_tensor(valid, dtype=torch.bool)
                 X_val_t = X_val_t[keep]
                 y_val_t = y_val_t[keep]
                 g_val = g_val[valid]
@@ -306,11 +324,8 @@ class MinimaxParetoFairness(FairMethod):
         if X_fit.shape[0] == 0 or X_val_t.shape[0] == 0:
             raise ValueError("No hay suficientes datos tras construir train/val para MMPF")
 
-        y_fit_1hot = self._to_one_hot_binary(y_fit)
-        y_val_1hot = self._to_one_hot_binary(y_val_t)
-
-        train_loader = self._build_loader(X_fit, y_fit_1hot, g_fit, train=True)
-        val_loader = self._build_loader(X_val_t, y_val_1hot, g_val, train=False)
+        train_loader = self._build_loader(X_fit, y_fit, g_fit, train=True)
+        val_loader = self._build_loader(X_val_t, y_val_t, g_val, train=False)
 
         self.model = _MMPFNet(self.input_dim, hidden_units=self.hidden_units).to(device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
@@ -386,11 +401,23 @@ class MinimaxParetoFairness(FairMethod):
         if self.model is None:
             raise RuntimeError("El modelo no ha sido entrenado")
 
+        predict_batch_size = int(kwargs.get("batch_size", self.predict_batch_size))
+        loader = DataLoader(
+            TensorDataset(self.X_test),
+            batch_size=predict_batch_size,
+            shuffle=False,
+            pin_memory=(device == "cuda"),
+        )
+
         self.model.eval()
+        chunks = []
         with torch.no_grad():
-            logits = self.model(self.X_test)
-            probs = torch.softmax(logits, dim=-1)[:, 1]
-        return probs.unsqueeze(1).cpu().numpy()
+            for (Xb,) in loader:
+                Xb = Xb.to(device, non_blocking=(device == "cuda"))
+                logits = self.model(Xb)
+                chunks.append(torch.softmax(logits, dim=-1)[:, 1].cpu())
+        probs = torch.cat(chunks, dim=0)
+        return probs.unsqueeze(1).numpy()
 
 
 # Backwards compatibility alias

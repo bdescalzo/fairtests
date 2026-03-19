@@ -37,11 +37,13 @@ class MetaLearning(FairMethod):
         self.loss_fn = nn.BCEWithLogitsLoss()
         self.effective_k_support = k_support
         self.effective_k_query = k_query
+        self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
 
     def load_data(self, X_train, y_train, X_test):
-        self.X_train = X_train.float().to(device)
-        self.y_train = y_train.float().to(device)
-        self.X_test = X_test.float().to(device)
+        # Keep datasets on CPU to avoid duplicating large tensors in VRAM.
+        self.X_train = X_train.float().cpu()
+        self.y_train = y_train.float().cpu()
+        self.X_test = X_test.float().cpu()
         self.input_dim = self.X_train.shape[1]
         self.datos_cargados = True
 
@@ -57,10 +59,13 @@ class MetaLearning(FairMethod):
         support_idx = chosen[:k_support]
         query_idx = chosen[k_support:]
 
-        support_x = self.X_train[support_idx]
-        support_y = self.y_train[support_idx]
-        query_x = self.X_train[query_idx]
-        query_y = self.y_train[query_idx]
+        support_idx_t = torch.as_tensor(support_idx, dtype=torch.long)
+        query_idx_t = torch.as_tensor(query_idx, dtype=torch.long)
+
+        support_x = self.X_train.index_select(0, support_idx_t).to(device)
+        support_y = self.y_train.index_select(0, support_idx_t).to(device)
+        query_x = self.X_train.index_select(0, query_idx_t).to(device)
+        query_y = self.y_train.index_select(0, query_idx_t).to(device)
         return support_x, support_y, query_x, query_y
 
     def _resolve_effective_k(self, unique_groups):
@@ -176,8 +181,9 @@ class MetaLearning(FairMethod):
             support_idx = np.random.choice(
                 idxs, size=self.effective_k_support, replace=replace
             )
-            X_support = self.X_train[support_idx]
-            y_support = self.y_train[support_idx]
+            support_idx_t = torch.as_tensor(support_idx, dtype=torch.long)
+            X_support = self.X_train.index_select(0, support_idx_t).to(device)
+            y_support = self.y_train.index_select(0, support_idx_t).to(device)
             adapted_params = {
                 name: param.clone().detach().requires_grad_(True)
                 for name, param in self.meta_model.named_parameters()
@@ -192,7 +198,10 @@ class MetaLearning(FairMethod):
                     for (name, param), grad in zip(adapted_params.items(), grads)
                 }
 
-            self.group_params[g_id] = adapted_params
+            # Persist adapted params on CPU to reduce persistent VRAM usage.
+            self.group_params[g_id] = {
+                name: param.detach().cpu() for name, param in adapted_params.items()
+            }
         print("[MAML] Adaptation complete.")
 
     def predict(self, sensitive_labels=None, **kwargs):
@@ -201,7 +210,8 @@ class MetaLearning(FairMethod):
 
         self.meta_model.eval()
         n_samples = self.X_test.shape[0]
-        predictions = torch.zeros(n_samples, device=device)
+        predictions = torch.zeros(n_samples, dtype=torch.float32)
+        batch_size = int(kwargs.get("batch_size", self.predict_batch_size))
 
         if sensitive_labels is not None:
             if isinstance(sensitive_labels, torch.Tensor):
@@ -210,19 +220,31 @@ class MetaLearning(FairMethod):
                 test_groups = np.asarray(sensitive_labels)
 
             for g_id in np.unique(test_groups):
-                mask = test_groups == g_id
-                mask_tensor = torch.tensor(mask, device=device)
-                X_group = self.X_test[mask_tensor]
-                if X_group.shape[0] == 0:
+                group_indices = np.where(test_groups == g_id)[0]
+                if group_indices.size == 0:
                     continue
 
-                params = self.group_params.get(g_id)
+                params_cpu = self.group_params.get(g_id)
+                params = None
+                if params_cpu is not None:
+                    params = {name: p.to(device) for name, p in params_cpu.items()}
+
                 with torch.no_grad():
-                    logits = self.meta_model(X_group, params=params)
-                    predictions[mask_tensor] = torch.sigmoid(logits)
+                    for start in range(0, group_indices.size, batch_size):
+                        end = min(start + batch_size, group_indices.size)
+                        batch_idx = group_indices[start:end]
+                        batch_idx_t = torch.as_tensor(batch_idx, dtype=torch.long)
+                        X_group = self.X_test.index_select(0, batch_idx_t).to(device)
+                        logits = self.meta_model(X_group, params=params)
+                        predictions[batch_idx_t] = torch.sigmoid(logits).cpu()
         else:
             with torch.no_grad():
-                logits = self.meta_model(self.X_test)
-                predictions = torch.sigmoid(logits)
+                for start in range(0, n_samples, batch_size):
+                    end = min(start + batch_size, n_samples)
+                    idx = np.arange(start, end)
+                    idx_t = torch.as_tensor(idx, dtype=torch.long)
+                    X_batch = self.X_test.index_select(0, idx_t).to(device)
+                    logits = self.meta_model(X_batch)
+                    predictions[idx_t] = torch.sigmoid(logits).cpu()
 
-        return predictions.unsqueeze(1).cpu().numpy()
+        return predictions.unsqueeze(1).numpy()

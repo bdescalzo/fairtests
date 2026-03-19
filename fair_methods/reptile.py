@@ -31,16 +31,17 @@ class Reptile(FairMethod):
 
         self.meta_model = None
         self.group_params = {}
-        self.group_models = {}
         self.datos_cargados = False
         self.input_dim = None
         self.sensitive_train = None
         self.loss_fn = nn.BCEWithLogitsLoss()
+        self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
 
     def load_data(self, X_train, y_train, X_test):
-        self.X_train = X_train.float().to(device)
-        self.y_train = y_train.float().to(device)
-        self.X_test = X_test.float().to(device)
+        # Keep full datasets on CPU and stream mini-batches to the device.
+        self.X_train = X_train.float().cpu()
+        self.y_train = y_train.float().cpu()
+        self.X_test = X_test.float().cpu()
         self.input_dim = self.X_train.shape[1]
         self.datos_cargados = True
 
@@ -50,10 +51,10 @@ class Reptile(FairMethod):
             return None, None
         replace = idxs.size < batch_size
         chosen = np.random.choice(idxs, size=batch_size, replace=replace)
-        idx_tensor = torch.as_tensor(chosen, device=device, dtype=torch.long)
+        idx_tensor = torch.as_tensor(chosen, dtype=torch.long)
         return (
-            self.X_train.index_select(0, idx_tensor),
-            self.y_train.index_select(0, idx_tensor),
+            self.X_train.index_select(0, idx_tensor).to(device),
+            self.y_train.index_select(0, idx_tensor).to(device),
         )
 
     def _inner_train(self, model, group_id):
@@ -77,9 +78,9 @@ class Reptile(FairMethod):
         for _ in range(self.inner_steps):
             replace = indices.size < self.inner_batch_size
             chosen = np.random.choice(indices, size=self.inner_batch_size, replace=replace)
-            idx_tensor = torch.as_tensor(chosen, device=device, dtype=torch.long)
-            Xb = self.X_train.index_select(0, idx_tensor)
-            yb = self.y_train.index_select(0, idx_tensor)
+            idx_tensor = torch.as_tensor(chosen, dtype=torch.long)
+            Xb = self.X_train.index_select(0, idx_tensor).to(device)
+            yb = self.y_train.index_select(0, idx_tensor).to(device)
             optimizer.zero_grad()
             logits = model(Xb)
             loss = self.loss_fn(logits, yb)
@@ -150,7 +151,6 @@ class Reptile(FairMethod):
         # Adaptation for inference (K-shot from training data)
         print("[Reptile] Adapting per-group parameters...")
         self.group_params = {}
-        self.group_models = {}
         for g_id in unique_groups:
             idxs = np.where(self.sensitive_train == g_id)[0]
             replace = idxs.size < self.k_support
@@ -161,9 +161,9 @@ class Reptile(FairMethod):
 
             self._inner_train_on_indices(adapted, support_idx)
 
-            adapted.eval()
-            self.group_models[g_id] = adapted
-            self.group_params[g_id] = {name: param.detach() for name, param in adapted.named_parameters()}
+            self.group_params[g_id] = {
+                name: param.detach().cpu() for name, param in adapted.named_parameters()
+            }
 
         print("[Reptile] Adaptation complete.")
 
@@ -172,7 +172,8 @@ class Reptile(FairMethod):
             raise RuntimeError("El modelo no ha sido entrenado")
 
         n_samples = self.X_test.shape[0]
-        predictions = torch.zeros(n_samples, device=device)
+        predictions = torch.zeros(n_samples, dtype=torch.float32)
+        batch_size = int(kwargs.get("batch_size", self.predict_batch_size))
 
         if sensitive_labels is not None:
             if isinstance(sensitive_labels, torch.Tensor):
@@ -181,29 +182,34 @@ class Reptile(FairMethod):
                 test_groups = np.asarray(sensitive_labels)
 
             for g_id in np.unique(test_groups):
-                mask = test_groups == g_id
-                mask_tensor = torch.tensor(mask, device=device)
-                X_group = self.X_test[mask_tensor]
-                if X_group.shape[0] == 0:
+                group_indices = np.where(test_groups == g_id)[0]
+                if group_indices.size == 0:
                     continue
 
-                group_model = self.group_models.get(g_id)
-                if group_model is not None:
-                    with torch.no_grad():
-                        logits = group_model(X_group)
-                        predictions[mask_tensor] = torch.sigmoid(logits)
-                elif self.group_params.get(g_id) is not None:
-                    params = self.group_params[g_id]
-                    with torch.no_grad():
-                        logits = self.meta_model(X_group, params=params)
-                        predictions[mask_tensor] = torch.sigmoid(logits)
-                else:
-                    with torch.no_grad():
-                        logits = self.meta_model(X_group)
-                        predictions[mask_tensor] = torch.sigmoid(logits)
+                params_cpu = self.group_params.get(g_id)
+                params = None
+                if params_cpu is not None:
+                    params = {name: p.to(device) for name, p in params_cpu.items()}
+
+                with torch.no_grad():
+                    for start in range(0, group_indices.size, batch_size):
+                        end = min(start + batch_size, group_indices.size)
+                        batch_idx = group_indices[start:end]
+                        batch_idx_t = torch.as_tensor(batch_idx, dtype=torch.long)
+                        X_group = self.X_test.index_select(0, batch_idx_t).to(device)
+                        if params is not None:
+                            logits = self.meta_model(X_group, params=params)
+                        else:
+                            logits = self.meta_model(X_group)
+                        predictions[batch_idx_t] = torch.sigmoid(logits).cpu()
         else:
             with torch.no_grad():
-                logits = self.meta_model(self.X_test)
-                predictions = torch.sigmoid(logits)
+                for start in range(0, n_samples, batch_size):
+                    end = min(start + batch_size, n_samples)
+                    idx = np.arange(start, end)
+                    idx_t = torch.as_tensor(idx, dtype=torch.long)
+                    X_batch = self.X_test.index_select(0, idx_t).to(device)
+                    logits = self.meta_model(X_batch)
+                    predictions[idx_t] = torch.sigmoid(logits).cpu()
 
-        return predictions.unsqueeze(1).cpu().numpy()
+        return predictions.unsqueeze(1).numpy()

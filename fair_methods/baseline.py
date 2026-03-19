@@ -21,9 +21,10 @@ class Baseline(FairMethod):
         self.loss_fn = nn.BCEWithLogitsLoss()
 
     def load_data(self, X_train, y_train, X_test):
-        self.X_train = X_train.float().to(device)
-        self.y_train = y_train.float().to(device)
-        self.X_test = X_test.float().to(device)
+        # Keep full tensors on CPU and stream mini-batches to device.
+        self.X_train = X_train.float().cpu()
+        self.y_train = y_train.float().cpu()
+        self.X_test = X_test.float().cpu()
         self.input_dim = self.X_train.shape[1]
         self.datos_cargados = True
 
@@ -35,7 +36,13 @@ class Baseline(FairMethod):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         dataset = TensorDataset(self.X_train, self.y_train)
-        loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+        pin_memory = device == "cuda"
+        loader = DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            pin_memory=pin_memory,
+        )
 
         print(
             f"[Baseline] Training for {self.epochs} epochs "
@@ -46,6 +53,8 @@ class Baseline(FairMethod):
             total_loss = 0.0
             total = 0
             for Xb, yb in loader:
+                Xb = Xb.to(device, non_blocking=pin_memory)
+                yb = yb.to(device, non_blocking=pin_memory)
                 optimizer.zero_grad()
                 logits = self.model(Xb)
                 loss = self.loss_fn(logits, yb)
@@ -63,8 +72,21 @@ class Baseline(FairMethod):
         if self.model is None:
             raise RuntimeError("El modelo no ha sido entrenado")
 
+        predict_batch_size = int(kwargs.get("batch_size", 8192))
+        pin_memory = device == "cuda"
+        loader = DataLoader(
+            TensorDataset(self.X_test),
+            batch_size=predict_batch_size,
+            shuffle=False,
+            pin_memory=pin_memory,
+        )
+
         self.model.eval()
+        chunks = []
         with torch.no_grad():
-            logits = self.model(self.X_test)
-            probs = torch.sigmoid(logits)
-        return probs.unsqueeze(1).cpu().numpy()
+            for (Xb,) in loader:
+                Xb = Xb.to(device, non_blocking=pin_memory)
+                logits = self.model(Xb)
+                chunks.append(torch.sigmoid(logits).cpu())
+        probs = torch.cat(chunks, dim=0)
+        return probs.unsqueeze(1).numpy()
