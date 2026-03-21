@@ -22,5 +22,5 @@ The implemented learning methods come from the following papers:
 
 1. ```meta.py```: Finn, C., Abbeel, P., & Levine, S. (2017). Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks. In Proceedings of the 34th International Conference on Machine Learning
     (PMLR 70). arXiv:1703.03400v3.
-  - ```reptile.py```: Nichol, A., Achiam, J., & Schulman, J. (2018). On First-Order Meta-Learning Algorithms. arXiv:1803.02999v3.
-  - ```mmpf.py```: Martinez, N., Bertran, M., & Sapiro, G. (2020). Minimax Pareto Fairness: A Multi Objective Perspective. Proceedings of Machine Learning Research, 119, 6755-6764.
+2. ```reptile.py```: Nichol, A., Achiam, J., & Schulman, J. (2018). On First-Order Meta-Learning Algorithms. arXiv:1803.02999v3.
+3. ```mmpf.py```: Martinez, N., Bertran, M., & Sapiro, G. (2020). Minimax Pareto Fairness: A Multi Objective Perspective. Proceedings of Machine Learning Research, 119, 6755-6764.
