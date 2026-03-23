@@ -18,6 +18,10 @@ class MetaLearning(FairMethod):
         k_support=128,
         k_query=128,
         replace=False,
+        group_budget_divisor=4,
+        support_fraction=1 / 3,
+        use_full_data=False,
+        seed=42,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -28,6 +32,10 @@ class MetaLearning(FairMethod):
         self.k_support = k_support
         self.k_query = k_query
         self.replace = replace
+        self.group_budget_divisor = group_budget_divisor
+        self.support_fraction = support_fraction
+        self.use_full_data = use_full_data
+        self.seed = seed
 
         self.meta_model = None
         self.group_params = {}
@@ -37,7 +45,9 @@ class MetaLearning(FairMethod):
         self.loss_fn = nn.BCEWithLogitsLoss()
         self.effective_k_support = k_support
         self.effective_k_query = k_query
+        self.effective_task_budget = k_support + k_query
         self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
+        self.rng = None
 
     def load_data(self, X_train, y_train, X_test):
         # Keep datasets on CPU to avoid duplicating large tensors in VRAM.
@@ -55,7 +65,7 @@ class MetaLearning(FairMethod):
             replace = idxs.size < (k_support + k_query)
         else:
             replace = False
-        chosen = np.random.choice(idxs, size=k_support + k_query, replace=replace)
+        chosen = self.rng.choice(idxs, size=k_support + k_query, replace=replace)
         support_idx = chosen[:k_support]
         query_idx = chosen[k_support:]
 
@@ -71,6 +81,7 @@ class MetaLearning(FairMethod):
     def _resolve_effective_k(self, unique_groups):
         self.effective_k_support = int(self.k_support)
         self.effective_k_query = int(self.k_query)
+        self.effective_task_budget = self.effective_k_support + self.effective_k_query
 
         if self.replace:
             return
@@ -83,22 +94,30 @@ class MetaLearning(FairMethod):
                 "(one for support and one for query)."
             )
 
-        requested_total = int(self.k_support + self.k_query)
-        if requested_total <= 0:
-            raise ValueError("k_support + k_query must be > 0")
+        if self.group_budget_divisor <= 0:
+            raise ValueError("group_budget_divisor must be > 0")
+        if not (0.0 < self.support_fraction < 1.0):
+            raise ValueError("support_fraction must be strictly between 0 and 1")
 
-        effective_total = min(requested_total, min_group_size)
-        support_ratio = float(self.k_support) / float(requested_total)
-        effective_k_support = int(round(effective_total * support_ratio))
+        # Tie the per-group task budget to the smallest group so every group can
+        # sustain the same support/query episode size without near-full reuse.
+        effective_total = max(2, min_group_size // int(self.group_budget_divisor))
+        effective_k_support = int(round(effective_total * float(self.support_fraction)))
         effective_k_support = max(1, min(effective_k_support, effective_total - 1))
         effective_k_query = effective_total - effective_k_support
 
+        self.effective_task_budget = effective_total
         self.effective_k_support = effective_k_support
         self.effective_k_query = effective_k_query
 
     def fit(self, sensitive_labels, **kwargs):
         if not self.datos_cargados:
             raise RuntimeError("No hay datos de entrenamiento cargados")
+
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
+        self.rng = np.random.default_rng(self.seed)
 
         # Update loss to handle class imbalance in the training data
         with torch.no_grad():
@@ -126,6 +145,7 @@ class MetaLearning(FairMethod):
             f"[MAML] Meta-training on {unique_groups.size} groups "
             f"(epochs={self.meta_epochs}, inner_steps={self.inner_steps}, "
             f"inner_lr={self.inner_lr}, meta_lr={self.meta_lr}, "
+            f"N={self.effective_task_budget}, "
             f"k_support={self.effective_k_support}, k_query={self.effective_k_query}, "
             f"replace={self.replace})"
         )
@@ -174,13 +194,16 @@ class MetaLearning(FairMethod):
         self.group_params = {}
         for g_id in unique_groups:
             idxs = np.where(self.sensitive_train == g_id)[0]
-            if self.replace:
-                replace = idxs.size < self.effective_k_support
+            if self.use_full_data:
+                support_idx = idxs
             else:
-                replace = False
-            support_idx = np.random.choice(
-                idxs, size=self.effective_k_support, replace=replace
-            )
+                if self.replace:
+                    replace = idxs.size < self.effective_k_support
+                else:
+                    replace = False
+                support_idx = self.rng.choice(
+                    idxs, size=self.effective_k_support, replace=replace
+                )
             support_idx_t = torch.as_tensor(support_idx, dtype=torch.long)
             X_support = self.X_train.index_select(0, support_idx_t).to(device)
             y_support = self.y_train.index_select(0, support_idx_t).to(device)
