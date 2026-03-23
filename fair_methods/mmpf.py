@@ -80,6 +80,8 @@ class MinimaxParetoFairness(FairMethod):
         self.X_val_external = None
         self.y_val_external = None
         self.sensitive_val_external = None
+        self.rng = None
+        self.torch_generator = None
 
     def load_data(self, X_train, y_train, X_test):
         # Keep the full dataset on CPU and stream mini-batches to device.
@@ -144,7 +146,12 @@ class MinimaxParetoFairness(FairMethod):
             counts[counts == 0] = 1.0
             sample_w = 1.0 / counts[g_idx]
             sample_w = torch.as_tensor(sample_w, dtype=torch.double)
-            sampler = WeightedRandomSampler(sample_w, len(sample_w), replacement=True)
+            sampler = WeightedRandomSampler(
+                sample_w,
+                len(sample_w),
+                replacement=True,
+                generator=self.torch_generator,
+            )
             return DataLoader(
                 dataset,
                 batch_size=self.batch_size,
@@ -157,6 +164,7 @@ class MinimaxParetoFairness(FairMethod):
             batch_size=self.batch_size,
             shuffle=train,
             pin_memory=(device == "cuda"),
+            generator=self.torch_generator,
         )
 
     def _epoch_linearweight(self, loader, train_type):
@@ -277,7 +285,10 @@ class MinimaxParetoFairness(FairMethod):
             raise ValueError("Se requieren etiquetas sensibles para entrenar MMPF")
 
         torch.manual_seed(self.seed)
-        np.random.seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
+        self.rng = np.random.default_rng(self.seed)
+        self.torch_generator = torch.Generator().manual_seed(self.seed)
 
         s_train = (
             sensitive_labels.detach().cpu().numpy()
@@ -293,7 +304,7 @@ class MinimaxParetoFairness(FairMethod):
 
         if X_val is None or y_val is None or s_val is None:
             n = self.X_train.shape[0]
-            perm = np.random.permutation(n)
+            perm = self.rng.permutation(n)
             n_val = max(1, int(round(val_fraction * n)))
             val_ids = perm[:n_val]
             tr_ids = perm[n_val:]

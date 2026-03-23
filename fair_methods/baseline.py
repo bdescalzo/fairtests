@@ -10,11 +10,12 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class Baseline(FairMethod):
-    def __init__(self, lr=1e-3, epochs=15, batch_size=1024, **kwargs):
+    def __init__(self, lr=1e-3, epochs=15, batch_size=1024, seed=42, **kwargs):
         super().__init__(**kwargs)
         self.lr = lr
         self.epochs = epochs
         self.batch_size = batch_size
+        self.seed = seed
         self.model = None
         self.datos_cargados = False
         self.input_dim = None
@@ -32,8 +33,12 @@ class Baseline(FairMethod):
         if not self.datos_cargados:
             raise RuntimeError("No hay datos de entrenamiento cargados")
 
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
         self.model = GenericModel(self.input_dim).to(device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        data_generator = torch.Generator().manual_seed(self.seed)
 
         dataset = TensorDataset(self.X_train, self.y_train)
         pin_memory = device == "cuda"
@@ -42,6 +47,7 @@ class Baseline(FairMethod):
             batch_size=self.batch_size,
             shuffle=True,
             pin_memory=pin_memory,
+            generator=data_generator,
         )
 
         print(

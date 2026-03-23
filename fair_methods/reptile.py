@@ -18,6 +18,7 @@ class Reptile(FairMethod):
         inner_batch_size=128,
         k_support=128,
         meta_batch_size=4,
+        seed=42,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -28,6 +29,7 @@ class Reptile(FairMethod):
         self.inner_batch_size = inner_batch_size
         self.k_support = k_support
         self.meta_batch_size = meta_batch_size
+        self.seed = seed
 
         self.meta_model = None
         self.group_params = {}
@@ -36,6 +38,7 @@ class Reptile(FairMethod):
         self.sensitive_train = None
         self.loss_fn = nn.BCEWithLogitsLoss()
         self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
+        self.rng = None
 
     def load_data(self, X_train, y_train, X_test):
         # Keep full datasets on CPU and stream mini-batches to the device.
@@ -50,7 +53,7 @@ class Reptile(FairMethod):
         if idxs.size == 0:
             return None, None
         replace = idxs.size < batch_size
-        chosen = np.random.choice(idxs, size=batch_size, replace=replace)
+        chosen = self.rng.choice(idxs, size=batch_size, replace=replace)
         idx_tensor = torch.as_tensor(chosen, dtype=torch.long)
         return (
             self.X_train.index_select(0, idx_tensor).to(device),
@@ -77,7 +80,9 @@ class Reptile(FairMethod):
         model.train()
         for _ in range(self.inner_steps):
             replace = indices.size < self.inner_batch_size
-            chosen = np.random.choice(indices, size=self.inner_batch_size, replace=replace)
+            chosen = self.rng.choice(
+                indices, size=self.inner_batch_size, replace=replace
+            )
             idx_tensor = torch.as_tensor(chosen, dtype=torch.long)
             Xb = self.X_train.index_select(0, idx_tensor).to(device)
             yb = self.y_train.index_select(0, idx_tensor).to(device)
@@ -90,6 +95,11 @@ class Reptile(FairMethod):
     def fit(self, sensitive_labels, **kwargs):
         if not self.datos_cargados:
             raise RuntimeError("No hay datos de entrenamiento cargados")
+
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
+        self.rng = np.random.default_rng(self.seed)
 
         # Update loss to handle class imbalance in the training data
         with torch.no_grad():
@@ -119,7 +129,7 @@ class Reptile(FairMethod):
         )
 
         for epoch in range(self.meta_epochs):
-            task_ids = np.random.choice(
+            task_ids = self.rng.choice(
                 unique_groups, size=self.meta_batch_size, replace=True
             )
             deltas = [torch.zeros_like(p) for p in self.meta_model.parameters()]
@@ -154,7 +164,7 @@ class Reptile(FairMethod):
         for g_id in unique_groups:
             idxs = np.where(self.sensitive_train == g_id)[0]
             replace = idxs.size < self.k_support
-            support_idx = np.random.choice(idxs, size=self.k_support, replace=replace)
+            support_idx = self.rng.choice(idxs, size=self.k_support, replace=replace)
 
             adapted = GenericModel(self.input_dim).to(device)
             adapted.load_state_dict(self.meta_model.state_dict())
