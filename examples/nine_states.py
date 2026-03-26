@@ -74,6 +74,8 @@ try:
 except Exception:  # pragma: no cover - fallback when internals are unavailable
     _FOLKTABLES_STATE_LIST = None
 
+SENSITIVE_FEATURE_INDEX = 9
+
 
 def _resolve_all_state_codes():
     # folktables currently supports the 50 states + PR (no DC).
@@ -94,13 +96,15 @@ def _iter_state_arrays(data_source, states):
         X, y, group = ACSIncome.df_to_numpy(acs_state)
         del acs_state
 
-        # Remove sensitive feature from the input (race is the last feature).
-        X_no_race = np.delete(X, 9, axis=1).astype(np.float32, copy=False)
+        X_full = X.astype(np.float32, copy=False)
+        X_no_race = np.delete(X_full, SENSITIVE_FEATURE_INDEX, axis=1).astype(
+            np.float32, copy=False
+        )
         y = y.astype(np.float32, copy=False)
         group = group.astype(np.int64, copy=False)
         del X
 
-        yield X_no_race, y, group
+        yield X_no_race, X_full, y, group
         gc.collect()
 
 
@@ -129,14 +133,16 @@ def _scale_chunk(X_chunk, mean, scale):
 def _prepare_all_states_dataset(data_source, test_size=0.2):
     states = ["AL", "AK", "AZ", "NH", "ME", "SD", "CA", "NY", "TX"]
     scaler = StandardScaler()
+    scaler_full = StandardScaler()
 
     print("[Example] Pass 1/2: fitting scaler on streamed training split...", flush=True)
     rng = np.random.default_rng(42)
     train_rows = 0
     test_rows = 0
     feature_dim = None
+    feature_dim_full = None
 
-    for X_state, y_state, _ in _iter_state_arrays(data_source, states):
+    for X_state, X_state_full, y_state, _ in _iter_state_arrays(data_source, states):
         if feature_dim is None:
             feature_dim = X_state.shape[1]
         elif X_state.shape[1] != feature_dim:
@@ -144,25 +150,36 @@ def _prepare_all_states_dataset(data_source, test_size=0.2):
                 f"Inconsistent feature size across states: "
                 f"expected {feature_dim}, got {X_state.shape[1]}"
             )
+        if feature_dim_full is None:
+            feature_dim_full = X_state_full.shape[1]
+        elif X_state_full.shape[1] != feature_dim_full:
+            raise RuntimeError(
+                f"Inconsistent full feature size across states: "
+                f"expected {feature_dim_full}, got {X_state_full.shape[1]}"
+            )
 
         test_mask = _build_stratified_test_mask(y_state, test_size=test_size, rng=rng)
         train_mask = ~test_mask
 
         if np.any(train_mask):
             scaler.partial_fit(X_state[train_mask])
+            scaler_full.partial_fit(X_state_full[train_mask])
             train_rows += int(train_mask.sum())
         if np.any(test_mask):
             test_rows += int(test_mask.sum())
 
-        del X_state, y_state, test_mask, train_mask
+        del X_state, X_state_full, y_state, test_mask, train_mask
         gc.collect()
 
-    if feature_dim is None or train_rows == 0 or test_rows == 0:
+    if feature_dim is None or feature_dim_full is None or train_rows == 0 or test_rows == 0:
         raise RuntimeError("Could not build non-empty train/test splits from all states.")
 
     mean = scaler.mean_.astype(np.float32, copy=False)
     scale = scaler.scale_.astype(np.float32, copy=False)
     scale[scale == 0.0] = 1.0
+    mean_full = scaler_full.mean_.astype(np.float32, copy=False)
+    scale_full = scaler_full.scale_.astype(np.float32, copy=False)
+    scale_full[scale_full == 0.0] = 1.0
 
     print(
         f"[Example] Planned split sizes: train={train_rows:,}, test={test_rows:,}.",
@@ -171,10 +188,12 @@ def _prepare_all_states_dataset(data_source, test_size=0.2):
     print("[Example] Pass 2/2: building scaled train/test arrays...", flush=True)
 
     X_train = np.empty((train_rows, feature_dim), dtype=np.float32)
+    X_train_full = np.empty((train_rows, feature_dim_full), dtype=np.float32)
     y_train = np.empty(train_rows, dtype=np.float32)
     g_train = np.empty(train_rows, dtype=np.int64)
 
     X_test = np.empty((test_rows, feature_dim), dtype=np.float32)
+    X_test_full = np.empty((test_rows, feature_dim_full), dtype=np.float32)
     y_test = np.empty(test_rows, dtype=np.float32)
     g_test = np.empty(test_rows, dtype=np.int64)
 
@@ -182,29 +201,37 @@ def _prepare_all_states_dataset(data_source, test_size=0.2):
     train_ptr = 0
     test_ptr = 0
 
-    for X_state, y_state, g_state in _iter_state_arrays(data_source, states):
+    for X_state, X_state_full, y_state, g_state in _iter_state_arrays(data_source, states):
         test_mask = _build_stratified_test_mask(y_state, test_size=test_size, rng=rng)
         train_mask = ~test_mask
 
         n_train = int(train_mask.sum())
         if n_train > 0:
             X_train_chunk = _scale_chunk(X_state[train_mask], mean, scale)
+            X_train_full_chunk = _scale_chunk(
+                X_state_full[train_mask], mean_full, scale_full
+            )
             X_train[train_ptr : train_ptr + n_train] = X_train_chunk
+            X_train_full[train_ptr : train_ptr + n_train] = X_train_full_chunk
             y_train[train_ptr : train_ptr + n_train] = y_state[train_mask]
             g_train[train_ptr : train_ptr + n_train] = g_state[train_mask]
             train_ptr += n_train
-            del X_train_chunk
+            del X_train_chunk, X_train_full_chunk
 
         n_test = int(test_mask.sum())
         if n_test > 0:
             X_test_chunk = _scale_chunk(X_state[test_mask], mean, scale)
+            X_test_full_chunk = _scale_chunk(
+                X_state_full[test_mask], mean_full, scale_full
+            )
             X_test[test_ptr : test_ptr + n_test] = X_test_chunk
+            X_test_full[test_ptr : test_ptr + n_test] = X_test_full_chunk
             y_test[test_ptr : test_ptr + n_test] = y_state[test_mask]
             g_test[test_ptr : test_ptr + n_test] = g_state[test_mask]
             test_ptr += n_test
-            del X_test_chunk
+            del X_test_chunk, X_test_full_chunk
 
-        del X_state, y_state, g_state, test_mask, train_mask
+        del X_state, X_state_full, y_state, g_state, test_mask, train_mask
         gc.collect()
 
     if train_ptr != train_rows or test_ptr != test_rows:
@@ -213,7 +240,7 @@ def _prepare_all_states_dataset(data_source, test_size=0.2):
             f"(train {train_ptr}/{train_rows}, test {test_ptr}/{test_rows})."
         )
 
-    return X_train, y_train, X_test, y_test, g_train, g_test
+    return X_train, y_train, X_test, y_test, g_train, g_test, X_train_full, X_test_full
 
 
 def main():
@@ -241,16 +268,23 @@ def main():
         survey="person",
     )
 
-    X_train, y_train, X_test, y_test, g_train, g_test = _prepare_all_states_dataset(
-        data_source,
-        test_size=args.test_size,
-    )
+    (
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        g_train,
+        g_test,
+        X_train_full,
+        X_test_full,
+    ) = _prepare_all_states_dataset(data_source, test_size=args.test_size)
 
     if args.min_k > 1:
         counts = np.bincount(g_train.astype(int))
         valid_groups = np.where(counts >= args.min_k)[0]
         valid_mask = np.isin(g_train, valid_groups)
         X_train = X_train[valid_mask]
+        X_train_full = X_train_full[valid_mask]
         y_train = y_train[valid_mask]
         g_train = g_train[valid_mask]
         print(
@@ -265,11 +299,13 @@ def main():
     print("[Example] Converting to tensors...", flush=True)
     X_train_t = torch.from_numpy(X_train)
     X_test_t = torch.from_numpy(X_test)
+    X_train_full_t = torch.from_numpy(X_train_full)
+    X_test_full_t = torch.from_numpy(X_test_full)
     y_train_t = torch.from_numpy(y_train.astype(np.float32, copy=False))
     y_test_t = torch.from_numpy(y_test.astype(np.float32, copy=False))
     g_train_t = torch.from_numpy(g_train.astype(np.int64, copy=False))
     g_test_t = torch.from_numpy(g_test.astype(np.int64, copy=False))
-    del X_train, X_test, y_train, y_test, g_train, g_test
+    del X_train, X_test, X_train_full, X_test_full, y_train, y_test, g_train, g_test
     gc.collect()
 
     print("[Example] Running fairtests...", flush=True)
@@ -282,6 +318,8 @@ def main():
         g_test_t,
         protected_value,
         store_predictions=False,
+        X_train_full=X_train_full_t,
+        X_test_full=X_test_full_t,
     )
 
     output_path = write_results_xlsx(
