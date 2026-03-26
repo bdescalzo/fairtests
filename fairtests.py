@@ -1,5 +1,8 @@
+import os
+import random
 import gc
 
+import numpy as np
 import torch
 
 from fair_methods import Baseline, MetaLearning, MinimaxParetoFairness, Reptile
@@ -11,6 +14,29 @@ AVAILABLE_METHODS = {
     "reptile": Reptile,
     "mmpf": MinimaxParetoFairness,
 }
+
+
+def _set_global_determinism(seed):
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    if hasattr(torch.backends, "cuda") and hasattr(torch.backends.cuda, "matmul"):
+        torch.backends.cuda.matmul.allow_tf32 = False
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.allow_tf32 = False
+
+    torch.use_deterministic_algorithms(True)
 
 
 def _resolve_methods(methods=None, method_names=None):
@@ -55,14 +81,19 @@ def run_fairtests(
     methods=None,
     method_names=None,
     store_predictions=True,
+    seed=42,
 ):
     print("[Fairtest] Starting evaluation pipeline.")
+    _set_global_determinism(seed)
     methods = _resolve_methods(methods=methods, method_names=method_names)
 
     results = {}
 
     for name, method_spec in methods.items():
+        _set_global_determinism(seed)
         method = method_spec() if isinstance(method_spec, type) else method_spec
+        if hasattr(method, "seed"):
+            method.seed = seed
         try:
             print(f"[Fairtest] Running method: {name}")
             method.load_data(X_train, y_train, X_test)
