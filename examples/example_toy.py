@@ -50,7 +50,7 @@ def generate_toy_dataset(n_samples=1000, seed=9845):
 
 def main():
     print("[Toy Example] Generating toy dataset...")
-    X, y, g = generate_toy_dataset(n_samples=1000, seed=9845)
+    X, y, g = generate_toy_dataset(n_samples=100000, seed=9845)
 
     X_train, X_test, y_train, y_test, g_train, g_test = train_test_split(
         X,
