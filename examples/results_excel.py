@@ -24,28 +24,12 @@ def write_results_xlsx(results, output_dir, results_name):
             )
 
             fairness = payload["fairness"].copy()
-            protected_metrics = fairness.pop("protected_group_metrics", {})
-            non_protected_metrics = fairness.pop("non_protected_group_metrics", {})
             fairness_df = pd.DataFrame([fairness])
             fairness_df.insert(0, "method", method_name)
             fairness_df.to_excel(writer, sheet_name=f"{method_name}_fairness", index=False)
 
             overall_side.append(overall_df)
             fairness_side.append(fairness_df)
-
-            if protected_metrics:
-                prot_df = pd.DataFrame([protected_metrics])
-                prot_df.insert(0, "method", method_name)
-                prot_df.to_excel(
-                    writer, sheet_name=f"{method_name}_protected", index=False
-                )
-
-            if non_protected_metrics:
-                nonprot_df = pd.DataFrame([non_protected_metrics])
-                nonprot_df.insert(0, "method", method_name)
-                nonprot_df.to_excel(
-                    writer, sheet_name=f"{method_name}_non_protected", index=False
-                )
 
         if overall_side:
             overall_side_df = pd.concat(overall_side, ignore_index=True)
