@@ -352,6 +352,7 @@ class MinimaxParetoFairness(FairMethod):
         risk_max_best = None
         best_mu = mu_i.copy()
         best_state = copy.deepcopy(self.model.state_dict())
+        best_opt_state = copy.deepcopy(self.optimizer.state_dict())
 
         iteration = 0
         while iteration <= self.niter and i_patience <= self.patience:
@@ -374,6 +375,7 @@ class MinimaxParetoFairness(FairMethod):
                 risk_max_best = risk_max
                 best_mu = mu_i.copy()
                 best_state = copy.deepcopy(self.model.state_dict())
+                best_opt_state = copy.deepcopy(self.optimizer.state_dict())
                 K = min(K, self.k_min)
                 i_patience = 0
                 step_type = "improved"
@@ -383,6 +385,7 @@ class MinimaxParetoFairness(FairMethod):
                 step_type = "no_improve"
 
             self.model.load_state_dict(best_state)
+            self.optimizer.load_state_dict(best_opt_state)
 
             step_mask = (risk >= risk_max_best).astype(np.float64)
             step_mu = step_mask / step_mask.sum()
@@ -405,6 +408,7 @@ class MinimaxParetoFairness(FairMethod):
             iteration += 1
 
         self.model.load_state_dict(best_state)
+        self.optimizer.load_state_dict(best_opt_state)
         self.best_state = copy.deepcopy(best_state)
         self.mu_penalty = torch.as_tensor(best_mu, dtype=torch.float32, device=device)
 
