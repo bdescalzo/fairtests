@@ -1,0 +1,7 @@
+  numpy==1.26.4
+  pandas==2.2.3
+  scikit-learn==1.5.2
+  torch==2.2.2
+  folktables==0.0.12
+  XlsxWriter==3.2.0
+
