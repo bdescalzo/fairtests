@@ -4,4 +4,4 @@
   torch==2.2.2
   folktables==0.0.12
   XlsxWriter==3.2.0
-
+  tensorflow-cpu==2.15.1
