@@ -308,6 +308,8 @@ def main():
     del X_train, X_test, X_train_full, X_test_full, y_train, y_test, g_train, g_test
     gc.collect()
 
+    base_model_class = None
+
     print("[Example] Running fairtests...", flush=True)
     results = run_fairtests(
         X_train_t,
@@ -320,6 +322,7 @@ def main():
         store_predictions=False,
         X_train_full=X_train_full_t,
         X_test_full=X_test_full_t,
+        model_class=base_model_class,
     )
 
     output_path = write_results_xlsx(

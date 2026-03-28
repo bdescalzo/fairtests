@@ -90,6 +90,7 @@ def main():
     g_test_t = torch.tensor(g_test, dtype=torch.long)
 
     protected_value = int(np.min(g_train))
+    base_model_class = None
 
     print("[Toy Example] Running fairtests...")
     results = run_fairtests(
@@ -102,6 +103,7 @@ def main():
         protected_value,
         X_train_full=X_train_full_t,
         X_test_full=X_test_full_t,
+        model_class=base_model_class,
     )
 
     output_path = write_results_xlsx(

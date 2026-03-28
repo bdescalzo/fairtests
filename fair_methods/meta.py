@@ -22,9 +22,10 @@ class MetaLearning(FairMethod):
         support_fraction=1 / 3,
         use_full_data=False,
         seed=42,
+        model_class=None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(model_class=model_class, **kwargs)
         self.inner_lr = inner_lr
         self.inner_steps = inner_steps
         self.meta_epochs = meta_epochs
@@ -42,6 +43,8 @@ class MetaLearning(FairMethod):
         self.datos_cargados = False
         self.input_dim = None
         self.sensitive_train = None
+        if self.model_class is None:
+            self.model_class = GenericModel
         self.loss_fn = nn.BCEWithLogitsLoss()
         self.effective_k_support = k_support
         self.effective_k_query = k_query
@@ -138,7 +141,7 @@ class MetaLearning(FairMethod):
             raise ValueError("No hay grupos sensibles para entrenar MAML")
 
         self._resolve_effective_k(unique_groups)
-        self.meta_model = GenericModel(self.input_dim).to(device)
+        self.meta_model = self.model_class(self.input_dim).to(device)
         meta_optimizer = torch.optim.Adam(self.meta_model.parameters(), lr=self.meta_lr)
 
         print(

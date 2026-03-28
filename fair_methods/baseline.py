@@ -10,12 +10,22 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class Baseline(FairMethod):
-    def __init__(self, lr=1e-3, epochs=15, batch_size=1024, seed=42, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        lr=1e-3,
+        epochs=15,
+        batch_size=1024,
+        seed=42,
+        model_class=None,
+        **kwargs,
+    ):
+        super().__init__(model_class=model_class, **kwargs)
         self.lr = lr
         self.epochs = epochs
         self.batch_size = batch_size
         self.seed = seed
+        if self.model_class is None:
+            self.model_class = GenericModel
         self.model = None
         self.datos_cargados = False
         self.input_dim = None
@@ -36,7 +46,7 @@ class Baseline(FairMethod):
         torch.manual_seed(self.seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self.seed)
-        self.model = GenericModel(self.input_dim).to(device)
+        self.model = self.model_class(self.input_dim).to(device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         data_generator = torch.Generator().manual_seed(self.seed)
 

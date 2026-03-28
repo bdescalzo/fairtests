@@ -19,9 +19,10 @@ class Reptile(FairMethod):
         k_support=128,
         meta_batch_size=4,
         seed=42,
+        model_class=None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(model_class=model_class, **kwargs)
         self.inner_lr = inner_lr
         self.inner_steps = inner_steps
         self.meta_epochs = meta_epochs
@@ -36,6 +37,8 @@ class Reptile(FairMethod):
         self.datos_cargados = False
         self.input_dim = None
         self.sensitive_train = None
+        if self.model_class is None:
+            self.model_class = GenericModel
         self.loss_fn = nn.BCEWithLogitsLoss()
         self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
         self.rng = None
@@ -119,7 +122,7 @@ class Reptile(FairMethod):
         if unique_groups.size == 0:
             raise ValueError("No hay grupos sensibles para entrenar Reptile")
 
-        self.meta_model = GenericModel(self.input_dim).to(device)
+        self.meta_model = self.model_class(self.input_dim).to(device)
 
         print(
             f"[Reptile] Meta-training on {unique_groups.size} groups "
@@ -136,7 +139,7 @@ class Reptile(FairMethod):
 
             for group_id in task_ids:
                 # Clone meta-model
-                adapted = GenericModel(self.input_dim).to(device)
+                adapted = self.model_class(self.input_dim).to(device)
                 adapted.load_state_dict(self.meta_model.state_dict())
 
                 # Inner-loop training on task
@@ -166,7 +169,7 @@ class Reptile(FairMethod):
             replace = idxs.size < self.k_support
             support_idx = self.rng.choice(idxs, size=self.k_support, replace=replace)
 
-            adapted = GenericModel(self.input_dim).to(device)
+            adapted = self.model_class(self.input_dim).to(device)
             adapted.load_state_dict(self.meta_model.state_dict())
 
             self._inner_train_on_indices(adapted, support_idx)

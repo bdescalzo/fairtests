@@ -111,6 +111,11 @@ def _resolve_full_baseline_name(existing_names):
     )
 
 
+def _validate_model_class(model_class):
+    if model_class is not None and not isinstance(model_class, type):
+        raise TypeError("model_class must be a class with the GenericModel interface.")
+
+
 def _run_single_method(
     *,
     method_name,
@@ -125,9 +130,18 @@ def _run_single_method(
     threshold,
     store_predictions,
     seed,
+    model_class,
 ):
     _set_global_determinism(seed)
-    method = method_spec() if isinstance(method_spec, type) else method_spec
+    if isinstance(method_spec, type):
+        constructor_kwargs = {}
+        if model_class is not None:
+            constructor_kwargs["model_class"] = model_class
+        method = method_spec(**constructor_kwargs)
+    else:
+        method = method_spec
+        if model_class is not None:
+            method.model_class = model_class
     if hasattr(method, "seed"):
         method.seed = seed
     try:
@@ -180,9 +194,11 @@ def run_fairtests(
     seed=42,
     X_train_full=None,
     X_test_full=None,
+    model_class=None,
 ):
     print("[Fairtest] Starting evaluation pipeline.")
     _set_global_determinism(seed)
+    _validate_model_class(model_class)
     methods = _resolve_methods(methods=methods, method_names=method_names)
     has_full_baseline_inputs = _validate_full_baseline_inputs(
         X_train, X_test, X_train_full, X_test_full
@@ -218,6 +234,7 @@ def run_fairtests(
             threshold=threshold,
             store_predictions=store_predictions,
             seed=seed,
+            model_class=model_class,
         )
 
         if full_baseline_name is not None and name == full_baseline_target:
@@ -234,6 +251,7 @@ def run_fairtests(
                 threshold=threshold,
                 store_predictions=store_predictions,
                 seed=seed,
+                model_class=model_class,
             )
 
     print("[Fairtest] All methods completed.")
