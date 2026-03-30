@@ -5,11 +5,12 @@ import gc
 import numpy as np
 import torch
 
-from fair_methods import Baseline, MetaLearning, MinimaxParetoFairness, Reptile
+from fair_methods import Baseline, GroupDRO, MetaLearning, MinimaxParetoFairness, Reptile
 from metrics.metrics import StandardMetrics, FairnessMetrics
 
 AVAILABLE_METHODS = {
-    "baseline": Baseline,
+    "baseline": Baseline,    
+    "dro": GroupDRO,
     "maml": MetaLearning,
     "reptile": Reptile,
     "mmpf": MinimaxParetoFairness,
