@@ -122,15 +122,6 @@ class MetaLearning(FairMethod):
             torch.cuda.manual_seed_all(self.seed)
         self.rng = np.random.default_rng(self.seed)
 
-        # Update loss to handle class imbalance in the training data
-        with torch.no_grad():
-            y = self.y_train
-            pos = torch.sum(y == 1).float()
-            neg = torch.sum(y == 0).float()
-            if pos > 0:
-                pos_weight = (neg / pos).clamp(min=1.0)
-                self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-
         if isinstance(sensitive_labels, torch.Tensor):
             self.sensitive_train = sensitive_labels.cpu().numpy()
         else:
