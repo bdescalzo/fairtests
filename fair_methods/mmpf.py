@@ -44,9 +44,10 @@ class MinimaxParetoFairness(FairMethod):
         balanced_sampler=True,
         seed=42,
         n_print=5,
+        model_class=None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(model_class=model_class, **kwargs)
         self.lr = lr
         self.max_epochs = max_epochs
         self.batch_size = batch_size
