@@ -108,18 +108,35 @@ def _iter_state_arrays(data_source, states):
         gc.collect()
 
 
-def _build_stratified_test_mask(y, test_size, rng):
+def _build_group_label_stratified_test_mask(y, group, test_size, rng):
     y_int = y.astype(np.int8, copy=False)
+    group_int = group.astype(np.int64, copy=False)
     test_mask = np.zeros(y_int.shape[0], dtype=bool)
-    for label in np.unique(y_int):
-        label_idx = np.flatnonzero(y_int == label)
-        if label_idx.size <= 1:
+    for group_id in np.unique(group_int):
+        group_idx = np.flatnonzero(group_int == group_id)
+        if group_idx.size <= 1:
             continue
-        n_test = int(round(test_size * label_idx.size))
-        n_test = min(max(n_test, 1), label_idx.size - 1)
-        if n_test > 0:
-            selected = rng.choice(label_idx, size=n_test, replace=False)
-            test_mask[selected] = True
+
+        local_mask = np.zeros(group_idx.size, dtype=bool)
+        y_group = y_int[group_idx]
+        for label in np.unique(y_group):
+            label_local_idx = np.flatnonzero(y_group == label)
+            if label_local_idx.size <= 1:
+                continue
+            n_test = int(round(test_size * label_local_idx.size))
+            n_test = min(max(n_test, 1), label_local_idx.size - 1)
+            if n_test > 0:
+                selected = rng.choice(label_local_idx, size=n_test, replace=False)
+                local_mask[selected] = True
+
+        if not np.any(local_mask):
+            n_test = int(round(test_size * group_idx.size))
+            n_test = min(max(n_test, 1), group_idx.size - 1)
+            if n_test > 0:
+                selected = rng.choice(group_idx.size, size=n_test, replace=False)
+                local_mask[selected] = True
+
+        test_mask[group_idx[local_mask]] = True
     return test_mask
 
 
@@ -142,7 +159,7 @@ def _prepare_all_states_dataset(data_source, test_size=0.2):
     feature_dim = None
     feature_dim_full = None
 
-    for X_state, X_state_full, y_state, _ in _iter_state_arrays(data_source, states):
+    for X_state, X_state_full, y_state, g_state in _iter_state_arrays(data_source, states):
         if feature_dim is None:
             feature_dim = X_state.shape[1]
         elif X_state.shape[1] != feature_dim:
@@ -158,7 +175,9 @@ def _prepare_all_states_dataset(data_source, test_size=0.2):
                 f"expected {feature_dim_full}, got {X_state_full.shape[1]}"
             )
 
-        test_mask = _build_stratified_test_mask(y_state, test_size=test_size, rng=rng)
+        test_mask = _build_group_label_stratified_test_mask(
+            y_state, g_state, test_size=test_size, rng=rng
+        )
         train_mask = ~test_mask
 
         if np.any(train_mask):
@@ -168,7 +187,7 @@ def _prepare_all_states_dataset(data_source, test_size=0.2):
         if np.any(test_mask):
             test_rows += int(test_mask.sum())
 
-        del X_state, X_state_full, y_state, test_mask, train_mask
+        del X_state, X_state_full, y_state, g_state, test_mask, train_mask
         gc.collect()
 
     if feature_dim is None or feature_dim_full is None or train_rows == 0 or test_rows == 0:
@@ -202,7 +221,9 @@ def _prepare_all_states_dataset(data_source, test_size=0.2):
     test_ptr = 0
 
     for X_state, X_state_full, y_state, g_state in _iter_state_arrays(data_source, states):
-        test_mask = _build_stratified_test_mask(y_state, test_size=test_size, rng=rng)
+        test_mask = _build_group_label_stratified_test_mask(
+            y_state, g_state, test_size=test_size, rng=rng
+        )
         train_mask = ~test_mask
 
         n_train = int(train_mask.sum())
@@ -294,8 +315,6 @@ def main():
         )
         del valid_mask
 
-    protected_value = int(np.min(g_train))
-
     print("[Example] Converting to tensors...", flush=True)
     X_train_t = torch.from_numpy(X_train)
     X_test_t = torch.from_numpy(X_test)
@@ -318,7 +337,6 @@ def main():
         y_test_t,
         g_train_t,
         g_test_t,
-        protected_value,
         store_predictions=False,
         X_train_full=X_train_full_t,
         X_test_full=X_test_full_t,

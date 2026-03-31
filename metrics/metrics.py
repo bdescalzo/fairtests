@@ -145,11 +145,10 @@ class StandardMetrics:
 
 
 class FairnessMetrics:
-    def __init__(self, y_true, y_prob, sensitive_labels, protected_value, threshold=0.5):
+    def __init__(self, y_true, y_prob, sensitive_labels, threshold=0.5):
         self.y_true = y_true
         self.y_prob = y_prob
         self.sensitive = _to_numpy(sensitive_labels)
-        self.protected_value = protected_value
         self.threshold = threshold
 
     def compute(self):
@@ -205,7 +204,7 @@ class FairnessMetrics:
                     avg_odds_pair = (left_group, right_group)
 
         return {
-            "protected_value": self.protected_value,
+            "metric_scope": "worst_pairwise_all_groups",
             "demographic_parity_diff": dp_diff,
             "demographic_parity_pair": dp_pair,
             "demographic_parity_ratio": dp_ratio,
@@ -220,6 +219,20 @@ class FairnessMetrics:
             "average_odds_pair": avg_odds_pair,
             "accuracy_diff": acc_diff,
             "accuracy_diff_pair": acc_pair,
+            "worst_pairwise_demographic_parity_diff": dp_diff,
+            "worst_pairwise_demographic_parity_pair": dp_pair,
+            "worst_pairwise_demographic_parity_ratio": dp_ratio,
+            "worst_pairwise_demographic_parity_ratio_pair": dp_ratio_pair,
+            "worst_pairwise_equal_opportunity_diff": tpr_diff,
+            "worst_pairwise_equal_opportunity_pair": tpr_pair,
+            "worst_pairwise_fpr_diff": fpr_diff,
+            "worst_pairwise_fpr_diff_pair": fpr_pair,
+            "worst_pairwise_equalized_odds_diff": eq_odds,
+            "worst_pairwise_equalized_odds_pair": eq_odds_pair,
+            "worst_pairwise_average_odds_diff": avg_odds,
+            "worst_pairwise_average_odds_pair": avg_odds_pair,
+            "worst_pairwise_accuracy_diff": acc_diff,
+            "worst_pairwise_accuracy_diff_pair": acc_pair,
             "worst_group_id": worst_group_id,
             "worst_group_accuracy": worst_group_accuracy,
             "worst_group_error_rate": (

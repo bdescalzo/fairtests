@@ -48,10 +48,25 @@ def generate_toy_dataset(n_samples=1000, seed=9845):
     return features, labels, sensitive
 
 
+def _build_joint_stratify_labels(labels, sensitive):
+    labels = np.asarray(labels, dtype=np.int64)
+    _, encoded_sensitive = np.unique(
+        np.asarray(sensitive, dtype=np.int64), return_inverse=True
+    )
+    _, encoded_labels = np.unique(labels, return_inverse=True)
+    joint = encoded_sensitive * max(1, int(np.max(encoded_labels)) + 1) + encoded_labels
+
+    counts = np.bincount(joint)
+    if counts.size == 0 or np.any(counts < 2):
+        return labels
+    return joint
+
+
 def main():
     print("[Toy Example] Generating toy dataset...")
     X, y, g = generate_toy_dataset(n_samples=100000, seed=9845)
     X_full = np.column_stack((X, g.astype(X.dtype, copy=False)))
+    stratify_labels = _build_joint_stratify_labels(y, g)
 
     (
         X_train,
@@ -69,7 +84,7 @@ def main():
         g,
         test_size=0.2,
         random_state=42,
-        stratify=y,
+        stratify=stratify_labels,
     )
 
     scaler = StandardScaler()
@@ -89,7 +104,6 @@ def main():
     g_train_t = torch.tensor(g_train, dtype=torch.long)
     g_test_t = torch.tensor(g_test, dtype=torch.long)
 
-    protected_value = int(np.min(g_train))
     base_model_class = None
 
     print("[Toy Example] Running fairtests...")
@@ -100,7 +114,6 @@ def main():
         y_test_t,
         g_train_t,
         g_test_t,
-        protected_value,
         X_train_full=X_train_full_t,
         X_test_full=X_test_full_t,
         model_class=base_model_class,
