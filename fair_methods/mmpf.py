@@ -12,6 +12,52 @@ from .fair_method import FairMethod
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _groupwise_train_val_split(group_idx, val_fraction, rng):
+    group_idx = np.asarray(group_idx, dtype=np.int64)
+    unique_groups = np.unique(group_idx)
+
+    train_parts = []
+    val_parts = []
+    undersized_groups = []
+
+    for group_id in unique_groups:
+        indices = np.flatnonzero(group_idx == group_id)
+        shuffled = rng.permutation(indices)
+
+        if shuffled.size < 2:
+            undersized_groups.append(group_id)
+            continue
+
+        n_val = int(round(val_fraction * shuffled.size))
+        n_val = min(max(n_val, 1), shuffled.size - 1)
+        val_parts.append(shuffled[:n_val])
+        train_parts.append(shuffled[n_val:])
+
+    if undersized_groups:
+        missing = ", ".join(str(group_id) for group_id in undersized_groups)
+        raise ValueError(
+            "MMPF internal validation requires at least 2 samples in every "
+            f"sensitive group. Undersized groups: {missing}. "
+            "Provide external validation data or filter rare groups first."
+        )
+
+    train_idx = (
+        np.concatenate(train_parts).astype(np.int64, copy=False)
+        if train_parts
+        else np.empty(0, dtype=np.int64)
+    )
+    val_idx = (
+        np.concatenate(val_parts).astype(np.int64, copy=False)
+        if val_parts
+        else np.empty(0, dtype=np.int64)
+    )
+
+    if train_idx.size == 0 or val_idx.size == 0:
+        raise ValueError("No hay suficientes datos para construir train/val en MMPF.")
+
+    return train_idx, val_idx
+
+
 class _MMPFNet(nn.Module):
     def __init__(self, input_dim, hidden_units=(512, 512), output_dim=2):
         super().__init__()
@@ -128,6 +174,16 @@ class MinimaxParetoFairness(FairMethod):
         idx = np.array([self.group_to_index.get(g, -1) for g in sensitive], dtype=np.int64)
         valid = idx >= 0
         return idx, valid
+
+    def _require_group_coverage(self, group_idx, context):
+        observed = set(np.unique(np.asarray(group_idx, dtype=np.int64)).tolist())
+        expected = set(range(len(self.group_values)))
+        missing = sorted(expected - observed)
+        if missing:
+            raise ValueError(
+                f"{context} must include at least one sample from every training group. "
+                f"Missing encoded groups: {missing}"
+            )
 
     @staticmethod
     def _to_one_hot_binary(y):
@@ -302,13 +358,13 @@ class MinimaxParetoFairness(FairMethod):
         y_val = self.y_val_external
         s_val = self.sensitive_val_external
         val_fraction = float(kwargs.get("val_fraction", 0.2))
+        if not (0.0 < val_fraction < 1.0):
+            raise ValueError("val_fraction must be strictly between 0 and 1")
 
         if X_val is None or y_val is None or s_val is None:
-            n = self.X_train.shape[0]
-            perm = self.rng.permutation(n)
-            n_val = max(1, int(round(val_fraction * n)))
-            val_ids = perm[:n_val]
-            tr_ids = perm[n_val:]
+            tr_ids, val_ids = _groupwise_train_val_split(
+                g_train_idx, val_fraction, self.rng
+            )
 
             X_fit = self.X_train[tr_ids]
             y_fit = self.y_train[tr_ids]
@@ -332,6 +388,9 @@ class MinimaxParetoFairness(FairMethod):
                 X_val_t = X_val_t[keep]
                 y_val_t = y_val_t[keep]
                 g_val = g_val[valid]
+
+        self._require_group_coverage(g_fit, "MMPF training split")
+        self._require_group_coverage(g_val, "MMPF validation split")
 
         if X_fit.shape[0] == 0 or X_val_t.shape[0] == 0:
             raise ValueError("No hay suficientes datos tras construir train/val para MMPF")
