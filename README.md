@@ -22,8 +22,9 @@ The ```examples/``` folder contains ```example.py```, which uses the [folktables
 ## TODO / Next planned steps
 1. Add more SOTA minimax-fairness learning algorithms found in the literature.
 2. Allow for easier hyperparameter choice, and implement automatic tuning for each method.
-3. Implement clustering-based methods for MAML.
-4. Implement standardized tests for various specific scenarios.
+3. Allow for multiple runs with different seeds for cross-validation.
+4. Implement clustering-based methods for MAML.
+5. Implement standardized tests for various specific scenarios.
 
 ## Method attributions
 
