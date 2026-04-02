@@ -3,7 +3,6 @@ import torch
 from torch import nn
 
 from .fair_method import FairMethod
-from .models import GenericModel
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -43,8 +42,6 @@ class MetaLearning(FairMethod):
         self.datos_cargados = False
         self.input_dim = None
         self.sensitive_train = None
-        if self.model_class is None:
-            self.model_class = GenericModel
         self.loss_fn = nn.BCEWithLogitsLoss()
         self.effective_k_support = k_support
         self.effective_k_query = k_query

@@ -7,6 +7,7 @@ import torch
 
 from fair_methods import Baseline, GroupDRO, MetaLearning, MinimaxParetoFairness, Reptile
 from metrics.metrics import StandardMetrics, FairnessMetrics
+from models import GenericModel
 
 AVAILABLE_METHODS = {
     "baseline": Baseline,    
@@ -197,6 +198,8 @@ def run_fairtests(
     print("[Fairtest] Starting evaluation pipeline.")
     _set_global_determinism(seed)
     _validate_model_class(model_class)
+    if model_class is None:
+        model_class = GenericModel
     methods = _resolve_methods(methods=methods, method_names=method_names)
     has_full_baseline_inputs = _validate_full_baseline_inputs(
         X_train, X_test, X_train_full, X_test_full

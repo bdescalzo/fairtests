@@ -7,7 +7,6 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 from .fair_method import FairMethod
-from .models import GenericModel
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -335,9 +334,6 @@ class GroupDRO(FairMethod):
         self.seed = int(seed)
         self.n_print = int(n_print)
         self.predict_batch_size = int(kwargs.get("predict_batch_size", 8192))
-
-        if self.model_class is None:
-            self.model_class = GenericModel
 
         self.model = None
         self.optimizer = None

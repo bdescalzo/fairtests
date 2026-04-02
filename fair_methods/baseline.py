@@ -4,7 +4,6 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from .fair_method import FairMethod
-from .models import GenericModel
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -24,8 +23,6 @@ class Baseline(FairMethod):
         self.epochs = epochs
         self.batch_size = batch_size
         self.seed = seed
-        if self.model_class is None:
-            self.model_class = GenericModel
         self.model = None
         self.datos_cargados = False
         self.input_dim = None

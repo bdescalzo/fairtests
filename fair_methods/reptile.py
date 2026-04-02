@@ -6,7 +6,6 @@ import torch
 from torch import nn
 
 from .fair_method import FairMethod
-from .models import GenericModel
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -59,8 +58,6 @@ class Reptile(FairMethod):
         self.datos_cargados = False
         self.input_dim = None
         self.sensitive_train = None
-        if self.model_class is None:
-            self.model_class = GenericModel
         self.loss_fn = nn.BCEWithLogitsLoss()
         self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
         self.rng = None
