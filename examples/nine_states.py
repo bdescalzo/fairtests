@@ -6,14 +6,14 @@ import sys
 import numpy as np
 import torch
 from folktables import ACSDataSource, ACSIncome
-from sklearn.preprocessing import StandardScaler
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from fairtests import run_fairtests
-from examples.results_excel import write_results_xlsx
+from data_tools.preprocessing import prepare_fair_splits_from_chunks
+from fairtests import get_hyperparams, run_fairtests
+from examples.results_excel import write_hyperparams_xlsx, write_results_xlsx
 
 
 FALLBACK_ALL_STATE_CODES = (
@@ -95,173 +95,10 @@ def _iter_state_arrays(data_source, states):
 
         X, y, group = ACSIncome.df_to_numpy(acs_state)
         del acs_state
+        del group
 
-        X_full = X.astype(np.float32, copy=False)
-        X_no_race = np.delete(X_full, SENSITIVE_FEATURE_INDEX, axis=1).astype(
-            np.float32, copy=False
-        )
-        y = y.astype(np.float32, copy=False)
-        group = group.astype(np.int64, copy=False)
-        del X
-
-        yield X_no_race, X_full, y, group
+        yield X.astype(np.float32, copy=False), y.astype(np.float32, copy=False)
         gc.collect()
-
-
-def _build_group_label_stratified_test_mask(y, group, test_size, rng):
-    y_int = y.astype(np.int8, copy=False)
-    group_int = group.astype(np.int64, copy=False)
-    test_mask = np.zeros(y_int.shape[0], dtype=bool)
-    for group_id in np.unique(group_int):
-        group_idx = np.flatnonzero(group_int == group_id)
-        if group_idx.size <= 1:
-            continue
-
-        local_mask = np.zeros(group_idx.size, dtype=bool)
-        y_group = y_int[group_idx]
-        for label in np.unique(y_group):
-            label_local_idx = np.flatnonzero(y_group == label)
-            if label_local_idx.size <= 1:
-                continue
-            n_test = int(round(test_size * label_local_idx.size))
-            n_test = min(max(n_test, 1), label_local_idx.size - 1)
-            if n_test > 0:
-                selected = rng.choice(label_local_idx, size=n_test, replace=False)
-                local_mask[selected] = True
-
-        if not np.any(local_mask):
-            n_test = int(round(test_size * group_idx.size))
-            n_test = min(max(n_test, 1), group_idx.size - 1)
-            if n_test > 0:
-                selected = rng.choice(group_idx.size, size=n_test, replace=False)
-                local_mask[selected] = True
-
-        test_mask[group_idx[local_mask]] = True
-    return test_mask
-
-
-def _scale_chunk(X_chunk, mean, scale):
-    X_chunk = X_chunk.astype(np.float32, copy=False)
-    X_chunk -= mean
-    X_chunk /= scale
-    return X_chunk
-
-
-def _prepare_all_states_dataset(data_source, test_size=0.2):
-    states = ["AL", "AK", "AZ", "NH", "ME", "SD", "CA", "NY", "TX"]
-    scaler = StandardScaler()
-    scaler_full = StandardScaler()
-
-    print("[Example] Pass 1/2: fitting scaler on streamed training split...", flush=True)
-    rng = np.random.default_rng(42)
-    train_rows = 0
-    test_rows = 0
-    feature_dim = None
-    feature_dim_full = None
-
-    for X_state, X_state_full, y_state, g_state in _iter_state_arrays(data_source, states):
-        if feature_dim is None:
-            feature_dim = X_state.shape[1]
-        elif X_state.shape[1] != feature_dim:
-            raise RuntimeError(
-                f"Inconsistent feature size across states: "
-                f"expected {feature_dim}, got {X_state.shape[1]}"
-            )
-        if feature_dim_full is None:
-            feature_dim_full = X_state_full.shape[1]
-        elif X_state_full.shape[1] != feature_dim_full:
-            raise RuntimeError(
-                f"Inconsistent full feature size across states: "
-                f"expected {feature_dim_full}, got {X_state_full.shape[1]}"
-            )
-
-        test_mask = _build_group_label_stratified_test_mask(
-            y_state, g_state, test_size=test_size, rng=rng
-        )
-        train_mask = ~test_mask
-
-        if np.any(train_mask):
-            scaler.partial_fit(X_state[train_mask])
-            scaler_full.partial_fit(X_state_full[train_mask])
-            train_rows += int(train_mask.sum())
-        if np.any(test_mask):
-            test_rows += int(test_mask.sum())
-
-        del X_state, X_state_full, y_state, g_state, test_mask, train_mask
-        gc.collect()
-
-    if feature_dim is None or feature_dim_full is None or train_rows == 0 or test_rows == 0:
-        raise RuntimeError("Could not build non-empty train/test splits from all states.")
-
-    mean = scaler.mean_.astype(np.float32, copy=False)
-    scale = scaler.scale_.astype(np.float32, copy=False)
-    scale[scale == 0.0] = 1.0
-    mean_full = scaler_full.mean_.astype(np.float32, copy=False)
-    scale_full = scaler_full.scale_.astype(np.float32, copy=False)
-    scale_full[scale_full == 0.0] = 1.0
-
-    print(
-        f"[Example] Planned split sizes: train={train_rows:,}, test={test_rows:,}.",
-        flush=True,
-    )
-    print("[Example] Pass 2/2: building scaled train/test arrays...", flush=True)
-
-    X_train = np.empty((train_rows, feature_dim), dtype=np.float32)
-    X_train_full = np.empty((train_rows, feature_dim_full), dtype=np.float32)
-    y_train = np.empty(train_rows, dtype=np.float32)
-    g_train = np.empty(train_rows, dtype=np.int64)
-
-    X_test = np.empty((test_rows, feature_dim), dtype=np.float32)
-    X_test_full = np.empty((test_rows, feature_dim_full), dtype=np.float32)
-    y_test = np.empty(test_rows, dtype=np.float32)
-    g_test = np.empty(test_rows, dtype=np.int64)
-
-    rng = np.random.default_rng(42)
-    train_ptr = 0
-    test_ptr = 0
-
-    for X_state, X_state_full, y_state, g_state in _iter_state_arrays(data_source, states):
-        test_mask = _build_group_label_stratified_test_mask(
-            y_state, g_state, test_size=test_size, rng=rng
-        )
-        train_mask = ~test_mask
-
-        n_train = int(train_mask.sum())
-        if n_train > 0:
-            X_train_chunk = _scale_chunk(X_state[train_mask], mean, scale)
-            X_train_full_chunk = _scale_chunk(
-                X_state_full[train_mask], mean_full, scale_full
-            )
-            X_train[train_ptr : train_ptr + n_train] = X_train_chunk
-            X_train_full[train_ptr : train_ptr + n_train] = X_train_full_chunk
-            y_train[train_ptr : train_ptr + n_train] = y_state[train_mask]
-            g_train[train_ptr : train_ptr + n_train] = g_state[train_mask]
-            train_ptr += n_train
-            del X_train_chunk, X_train_full_chunk
-
-        n_test = int(test_mask.sum())
-        if n_test > 0:
-            X_test_chunk = _scale_chunk(X_state[test_mask], mean, scale)
-            X_test_full_chunk = _scale_chunk(
-                X_state_full[test_mask], mean_full, scale_full
-            )
-            X_test[test_ptr : test_ptr + n_test] = X_test_chunk
-            X_test_full[test_ptr : test_ptr + n_test] = X_test_full_chunk
-            y_test[test_ptr : test_ptr + n_test] = y_state[test_mask]
-            g_test[test_ptr : test_ptr + n_test] = g_state[test_mask]
-            test_ptr += n_test
-            del X_test_chunk, X_test_full_chunk
-
-        del X_state, X_state_full, y_state, g_state, test_mask, train_mask
-        gc.collect()
-
-    if train_ptr != train_rows or test_ptr != test_rows:
-        raise RuntimeError(
-            f"Split size mismatch after second pass "
-            f"(train {train_ptr}/{train_rows}, test {test_ptr}/{test_rows})."
-        )
-
-    return X_train, y_train, X_test, y_test, g_train, g_test, X_train_full, X_test_full
 
 
 def main():
@@ -288,43 +125,35 @@ def main():
         horizon="1-Year",
         survey="person",
     )
+    states = ["AL", "AK", "AZ", "NH", "ME", "SD", "CA", "NY", "TX"]
 
-    (
-        X_train,
-        y_train,
-        X_test,
-        y_test,
-        g_train,
-        g_test,
-        X_train_full,
-        X_test_full,
-    ) = _prepare_all_states_dataset(data_source, test_size=args.test_size)
+    def chunk_factory():
+        return _iter_state_arrays(data_source, states)
 
+    prepared = prepare_fair_splits_from_chunks(
+        chunk_factory=chunk_factory,
+        protected_feature_index=SENSITIVE_FEATURE_INDEX,
+        test_size=args.test_size,
+        seed=42,
+        min_train_group_size=args.min_k,
+    )
     if args.min_k > 1:
-        counts = np.bincount(g_train.astype(int))
-        valid_groups = np.where(counts >= args.min_k)[0]
-        valid_mask = np.isin(g_train, valid_groups)
-        X_train = X_train[valid_mask]
-        X_train_full = X_train_full[valid_mask]
-        y_train = y_train[valid_mask]
-        g_train = g_train[valid_mask]
         print(
             f"[Example] Filtered training groups with min_k={args.min_k}. "
-            f"Kept {len(valid_groups)} groups.",
+            f"Kept {np.unique(prepared.g_train).size} groups.",
             flush=True,
         )
-        del valid_mask
 
     print("[Example] Converting to tensors...", flush=True)
-    X_train_t = torch.from_numpy(X_train)
-    X_test_t = torch.from_numpy(X_test)
-    X_train_full_t = torch.from_numpy(X_train_full)
-    X_test_full_t = torch.from_numpy(X_test_full)
-    y_train_t = torch.from_numpy(y_train.astype(np.float32, copy=False))
-    y_test_t = torch.from_numpy(y_test.astype(np.float32, copy=False))
-    g_train_t = torch.from_numpy(g_train.astype(np.int64, copy=False))
-    g_test_t = torch.from_numpy(g_test.astype(np.int64, copy=False))
-    del X_train, X_test, X_train_full, X_test_full, y_train, y_test, g_train, g_test
+    X_train_t = torch.from_numpy(prepared.X_train)
+    X_test_t = torch.from_numpy(prepared.X_test)
+    X_train_full_t = torch.from_numpy(prepared.X_train_full)
+    X_test_full_t = torch.from_numpy(prepared.X_test_full)
+    y_train_t = torch.from_numpy(prepared.y_train)
+    y_test_t = torch.from_numpy(prepared.y_test)
+    g_train_t = torch.from_numpy(prepared.g_train)
+    g_test_t = torch.from_numpy(prepared.g_test)
+    del prepared
     gc.collect()
 
     base_model_class = None
@@ -342,13 +171,23 @@ def main():
         X_test_full=X_test_full_t,
         model_class=base_model_class,
     )
+    hyperparams = get_hyperparams()
 
     output_path = write_results_xlsx(
         results=results,
         output_dir=os.path.dirname(__file__),
         results_name="folktables_results",
     )
+    hyperparams_output_path = write_hyperparams_xlsx(
+        hyperparams=hyperparams,
+        output_dir=os.path.dirname(__file__),
+        results_name="folktables_hyperparams",
+    )
     print(f"[Example] Writing results to {output_path}", flush=True)
+    print(
+        f"[Example] Writing hyperparameters to {hyperparams_output_path}",
+        flush=True,
+    )
 
     print("[Example] Done.", flush=True)
 
