@@ -1,6 +1,7 @@
 import os
 import random
 import gc
+import copy
 
 import numpy as np
 import torch
@@ -16,6 +17,8 @@ AVAILABLE_METHODS = {
     "reptile": Reptile,
     "mmpf": MinimaxParetoFairness,
 }
+
+_LAST_HYPERPARAMS = {}
 
 
 def _set_global_determinism(seed):
@@ -145,6 +148,9 @@ def _run_single_method(
             method.model_class = model_class
     if hasattr(method, "seed"):
         method.seed = seed
+    method_hyperparams = (
+        method.get_hyperparams() if hasattr(method, "get_hyperparams") else {}
+    )
     try:
         print(f"[Fairtest] Running method: {method_name}")
         method.load_data(X_train, y_train, X_test)
@@ -171,12 +177,16 @@ def _run_single_method(
         if store_predictions:
             result["y_prob"] = y_prob
         print(f"[Fairtest] Finished method: {method_name}")
-        return result
+        return result, method_hyperparams
     finally:
         del method
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+
+def get_hyperparams():
+    return copy.deepcopy(_LAST_HYPERPARAMS)
 
 
 def run_fairtests(
@@ -195,11 +205,13 @@ def run_fairtests(
     X_test_full=None,
     model_class=None,
 ):
+    global _LAST_HYPERPARAMS
     print("[Fairtest] Starting evaluation pipeline.")
     _set_global_determinism(seed)
     _validate_model_class(model_class)
     if model_class is None:
         model_class = GenericModel
+    _LAST_HYPERPARAMS = {}
     methods = _resolve_methods(methods=methods, method_names=method_names)
     has_full_baseline_inputs = _validate_full_baseline_inputs(
         X_train, X_test, X_train_full, X_test_full
@@ -222,7 +234,7 @@ def run_fairtests(
         full_baseline_target = baseline_method_names[0]
 
     for name, method_spec in methods.items():
-        results[name] = _run_single_method(
+        results[name], _LAST_HYPERPARAMS[name] = _run_single_method(
             method_name=name,
             method_spec=method_spec,
             X_train=X_train,
@@ -238,7 +250,10 @@ def run_fairtests(
         )
 
         if full_baseline_name is not None and name == full_baseline_target:
-            results[full_baseline_name] = _run_single_method(
+            (
+                results[full_baseline_name],
+                _LAST_HYPERPARAMS[full_baseline_name],
+            ) = _run_single_method(
                 method_name=full_baseline_name,
                 method_spec=method_spec,
                 X_train=X_train_full,

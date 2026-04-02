@@ -69,6 +69,22 @@ class Reptile(FairMethod):
         self._working_model = None
         self._working_optimizer = None
         self._batch_rng = None
+        self._set_hyperparams(
+            inner_lr=self.inner_lr,
+            inner_steps=self.inner_steps,
+            meta_epochs=self.meta_epochs,
+            meta_lr=self.meta_lr,
+            meta_lr_final=self.meta_lr_final,
+            inner_batch_size=self.inner_batch_size,
+            k_support=self.k_support,
+            train_k_support=self.train_k_support,
+            meta_batch_size=self.meta_batch_size,
+            replace=self.replace,
+            eval_inner_steps=self.eval_inner_steps,
+            eval_inner_batch_size=self.eval_inner_batch_size,
+            seed=self.seed,
+            predict_batch_size=self.predict_batch_size,
+        )
 
     def load_data(self, X_train, y_train, X_test):
         # Keep full datasets on CPU and stream episode batches to the device.

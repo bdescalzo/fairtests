@@ -48,6 +48,20 @@ class MetaLearning(FairMethod):
         self.effective_task_budget = k_support + k_query
         self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
         self.rng = None
+        self._set_hyperparams(
+            inner_lr=self.inner_lr,
+            inner_steps=self.inner_steps,
+            meta_epochs=self.meta_epochs,
+            meta_lr=self.meta_lr,
+            k_support=self.k_support,
+            k_query=self.k_query,
+            replace=self.replace,
+            group_budget_divisor=self.group_budget_divisor,
+            support_fraction=self.support_fraction,
+            use_full_data=self.use_full_data,
+            seed=self.seed,
+            predict_batch_size=self.predict_batch_size,
+        )
 
     def load_data(self, X_train, y_train, X_test):
         # Keep datasets on CPU to avoid duplicating large tensors in VRAM.

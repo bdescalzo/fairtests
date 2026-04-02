@@ -128,6 +128,25 @@ class MinimaxParetoFairness(FairMethod):
         self.best_state = None
         self.rng = None
         self.torch_generator = None
+        self._set_hyperparams(
+            lr=self.lr,
+            max_epochs=self.max_epochs,
+            batch_size=self.batch_size,
+            niter=self.niter,
+            patience=self.patience,
+            lrdecay=self.lrdecay,
+            alpha=self.alpha,
+            k_ini=self.k_ini,
+            k_min=self.k_min,
+            risk_round_factor=self.risk_round_factor,
+            reset_optimizer=self.reset_optimizer,
+            hidden_units=self.hidden_units,
+            balanced_sampler=self.balanced_sampler,
+            seed=self.seed,
+            n_print=self.n_print,
+            val_fraction=self.val_fraction,
+            predict_batch_size=self.predict_batch_size,
+        )
 
     def load_data(self, X_train, y_train, X_test):
         # Keep the full dataset on CPU and stream mini-batches to device.

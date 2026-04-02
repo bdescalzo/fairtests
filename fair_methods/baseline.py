@@ -23,10 +23,18 @@ class Baseline(FairMethod):
         self.epochs = epochs
         self.batch_size = batch_size
         self.seed = seed
+        self.predict_batch_size = int(kwargs.get("predict_batch_size", 8192))
         self.model = None
         self.datos_cargados = False
         self.input_dim = None
         self.loss_fn = nn.BCEWithLogitsLoss()
+        self._set_hyperparams(
+            lr=self.lr,
+            epochs=self.epochs,
+            batch_size=self.batch_size,
+            seed=self.seed,
+            predict_batch_size=self.predict_batch_size,
+        )
 
     def load_data(self, X_train, y_train, X_test):
         # Keep full tensors on CPU and stream mini-batches to device.
@@ -85,7 +93,7 @@ class Baseline(FairMethod):
         if self.model is None:
             raise RuntimeError("El modelo no ha sido entrenado")
 
-        predict_batch_size = int(kwargs.get("batch_size", 8192))
+        predict_batch_size = int(kwargs.get("batch_size", self.predict_batch_size))
         pin_memory = device == "cuda"
         loader = DataLoader(
             TensorDataset(self.X_test),

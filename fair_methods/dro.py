@@ -348,6 +348,27 @@ class GroupDRO(FairMethod):
         self.X_train = None
         self.y_train = None
         self.X_test = None
+        self._set_hyperparams(
+            n_epochs=self.n_epochs,
+            batch_size=self.batch_size,
+            lr=self.lr,
+            weight_decay=self.weight_decay,
+            alpha=self.alpha,
+            gamma=self.gamma,
+            robust_step_size=self.robust_step_size,
+            generalization_adjustment=self.generalization_adjustment,
+            automatic_adjustment=self.automatic_adjustment,
+            use_normalized_loss=self.use_normalized_loss,
+            btl=self.btl,
+            minimum_variational_weight=self.minimum_variational_weight,
+            reweight_groups=self.reweight_groups,
+            scheduler=self.scheduler,
+            val_fraction=self.val_fraction,
+            momentum=self.momentum,
+            seed=self.seed,
+            n_print=self.n_print,
+            predict_batch_size=self.predict_batch_size,
+        )
 
     def load_data(self, X_train, y_train, X_test):
         self.X_train = X_train.float().cpu()
