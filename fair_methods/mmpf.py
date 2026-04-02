@@ -90,6 +90,7 @@ class MinimaxParetoFairness(FairMethod):
         balanced_sampler=True,
         seed=42,
         n_print=5,
+        val_fraction=0.2,
         model_class=None,
         **kwargs,
     ):
@@ -109,6 +110,7 @@ class MinimaxParetoFairness(FairMethod):
         self.balanced_sampler = balanced_sampler
         self.seed = seed
         self.n_print = n_print
+        self.val_fraction = float(val_fraction)
         self.predict_batch_size = kwargs.get("predict_batch_size", 8192)
 
         self.model = None
@@ -124,9 +126,6 @@ class MinimaxParetoFairness(FairMethod):
         self.group_values = None
         self.group_to_index = None
         self.best_state = None
-        self.X_val_external = None
-        self.y_val_external = None
-        self.sensitive_val_external = None
         self.rng = None
         self.torch_generator = None
 
@@ -137,11 +136,6 @@ class MinimaxParetoFairness(FairMethod):
         self.X_test = X_test.float().cpu()
         self.input_dim = self.X_train.shape[1]
         self.datos_cargados = True
-
-    def set_validation_data(self, X_val, y_val, sensitive_val):
-        self.X_val_external = X_val
-        self.y_val_external = y_val
-        self.sensitive_val_external = sensitive_val
 
     @staticmethod
     def _pareto_check(table_results, eps_pareto=0.0):
@@ -168,22 +162,6 @@ class MinimaxParetoFairness(FairMethod):
         self.group_to_index = {g: i for i, g in enumerate(self.group_values)}
         mapped = np.array([self.group_to_index[g] for g in sensitive], dtype=np.int64)
         return mapped
-
-    def _encode_existing_groups(self, sensitive_labels):
-        sensitive = np.asarray(sensitive_labels)
-        idx = np.array([self.group_to_index.get(g, -1) for g in sensitive], dtype=np.int64)
-        valid = idx >= 0
-        return idx, valid
-
-    def _require_group_coverage(self, group_idx, context):
-        observed = set(np.unique(np.asarray(group_idx, dtype=np.int64)).tolist())
-        expected = set(range(len(self.group_values)))
-        missing = sorted(expected - observed)
-        if missing:
-            raise ValueError(
-                f"{context} must include at least one sample from every training group. "
-                f"Missing encoded groups: {missing}"
-            )
 
     @staticmethod
     def _to_one_hot_binary(y):
@@ -354,43 +332,20 @@ class MinimaxParetoFairness(FairMethod):
         )
         g_train_idx = self._make_group_map(s_train)
 
-        X_val = self.X_val_external
-        y_val = self.y_val_external
-        s_val = self.sensitive_val_external
-        val_fraction = float(kwargs.get("val_fraction", 0.2))
-        if not (0.0 < val_fraction < 1.0):
+        if not (0.0 < self.val_fraction < 1.0):
             raise ValueError("val_fraction must be strictly between 0 and 1")
 
-        if X_val is None or y_val is None or s_val is None:
-            tr_ids, val_ids = _groupwise_train_val_split(
-                g_train_idx, val_fraction, self.rng
-            )
+        tr_ids, val_ids = _groupwise_train_val_split(
+            g_train_idx, self.val_fraction, self.rng
+        )
 
-            X_fit = self.X_train[tr_ids]
-            y_fit = self.y_train[tr_ids]
-            g_fit = g_train_idx[tr_ids]
+        X_fit = self.X_train[tr_ids]
+        y_fit = self.y_train[tr_ids]
+        g_fit = g_train_idx[tr_ids]
 
-            X_val_t = self.X_train[val_ids]
-            y_val_t = self.y_train[val_ids]
-            g_val = g_train_idx[val_ids]
-        else:
-            X_fit = self.X_train
-            y_fit = self.y_train
-            g_fit = g_train_idx
-
-            X_val_t = X_val.float().cpu()
-            y_val_t = y_val.long().cpu()
-
-            s_val_np = s_val.detach().cpu().numpy() if isinstance(s_val, torch.Tensor) else np.asarray(s_val)
-            g_val, valid = self._encode_existing_groups(s_val_np)
-            if not np.all(valid):
-                keep = torch.as_tensor(valid, dtype=torch.bool)
-                X_val_t = X_val_t[keep]
-                y_val_t = y_val_t[keep]
-                g_val = g_val[valid]
-
-        self._require_group_coverage(g_fit, "MMPF training split")
-        self._require_group_coverage(g_val, "MMPF validation split")
+        X_val_t = self.X_train[val_ids]
+        y_val_t = self.y_train[val_ids]
+        g_val = g_train_idx[val_ids]
 
         if X_fit.shape[0] == 0 or X_val_t.shape[0] == 0:
             raise ValueError("No hay suficientes datos tras construir train/val para MMPF")

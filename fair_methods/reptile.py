@@ -30,23 +30,6 @@ class Reptile(FairMethod):
         model_class=None,
         **kwargs,
     ):
-        replacement = kwargs.pop("replacement", None)
-        train_shots = kwargs.pop("train_shots", None)
-        eval_inner_iters = kwargs.pop("eval_inner_iters", None)
-        eval_inner_batch = kwargs.pop("eval_inner_batch", None)
-        meta_step_final = kwargs.pop("meta_step_final", None)
-
-        if replacement is not None:
-            replace = replacement
-        if train_k_support in (None, 0) and train_shots not in (None, 0):
-            train_k_support = train_shots
-        if eval_inner_steps is None and eval_inner_iters is not None:
-            eval_inner_steps = eval_inner_iters
-        if eval_inner_batch_size is None and eval_inner_batch is not None:
-            eval_inner_batch_size = eval_inner_batch
-        if meta_lr_final is None and meta_step_final is not None:
-            meta_lr_final = meta_step_final
-
         super().__init__(model_class=model_class, **kwargs)
         self.inner_lr = float(inner_lr)
         self.inner_steps = int(inner_steps)

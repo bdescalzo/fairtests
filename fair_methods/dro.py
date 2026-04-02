@@ -353,10 +353,6 @@ class GroupDRO(FairMethod):
         self.y_train = None
         self.X_test = None
 
-        self.X_val_external = None
-        self.y_val_external = None
-        self.sensitive_val_external = None
-
     def load_data(self, X_train, y_train, X_test):
         self.X_train = X_train.float().cpu()
         self.y_train = y_train.float().cpu()
@@ -364,24 +360,11 @@ class GroupDRO(FairMethod):
         self.input_dim = int(self.X_train.shape[1])
         self.datos_cargados = True
 
-    def set_validation_data(self, X_val, y_val, sensitive_val):
-        self.X_val_external = X_val
-        self.y_val_external = y_val
-        self.sensitive_val_external = sensitive_val
-
     def _make_group_map(self, sensitive_labels):
         sensitive = np.asarray(sensitive_labels)
         self.group_values = np.unique(sensitive)
         self.group_to_index = {g: i for i, g in enumerate(self.group_values)}
         return np.array([self.group_to_index[g] for g in sensitive], dtype=np.int64)
-
-    def _encode_existing_groups(self, sensitive_labels):
-        sensitive = np.asarray(sensitive_labels)
-        encoded = np.array(
-            [self.group_to_index.get(g, -1) for g in sensitive], dtype=np.int64
-        )
-        valid = encoded >= 0
-        return encoded, valid
 
     def _build_loader(self, X, y, group_idx, train):
         dataset = TensorDataset(
@@ -422,49 +405,24 @@ class GroupDRO(FairMethod):
         )
 
     def _prepare_fit_and_val_splits(self, g_train_idx):
-        X_val = self.X_val_external
-        y_val = self.y_val_external
-        s_val = self.sensitive_val_external
-
-        if X_val is None or y_val is None or s_val is None:
-            train_idx, val_idx = _groupwise_train_val_split(
-                g_train_idx, self.val_fraction, self.rng
-            )
-            X_fit = self.X_train.index_select(
-                0, torch.as_tensor(train_idx, dtype=torch.long)
-            )
-            y_fit = self.y_train.index_select(
-                0, torch.as_tensor(train_idx, dtype=torch.long)
-            )
-            g_fit = g_train_idx[train_idx]
-
-            X_val_t = self.X_train.index_select(
-                0, torch.as_tensor(val_idx, dtype=torch.long)
-            )
-            y_val_t = self.y_train.index_select(
-                0, torch.as_tensor(val_idx, dtype=torch.long)
-            )
-            g_val = g_train_idx[val_idx]
-            return X_fit, y_fit, g_fit, X_val_t, y_val_t, g_val
-
-        X_fit = self.X_train
-        y_fit = self.y_train
-        g_fit = g_train_idx
-
-        X_val_t = X_val.float().cpu()
-        y_val_t = y_val.float().cpu()
-        s_val_np = (
-            s_val.detach().cpu().numpy()
-            if isinstance(s_val, torch.Tensor)
-            else np.asarray(s_val)
+        train_idx, val_idx = _groupwise_train_val_split(
+            g_train_idx, self.val_fraction, self.rng
         )
-        g_val, valid = self._encode_existing_groups(s_val_np)
-        if not np.all(valid):
-            keep = torch.as_tensor(valid, dtype=torch.bool)
-            X_val_t = X_val_t[keep]
-            y_val_t = y_val_t[keep]
-            g_val = g_val[valid]
+        X_fit = self.X_train.index_select(
+            0, torch.as_tensor(train_idx, dtype=torch.long)
+        )
+        y_fit = self.y_train.index_select(
+            0, torch.as_tensor(train_idx, dtype=torch.long)
+        )
+        g_fit = g_train_idx[train_idx]
 
+        X_val_t = self.X_train.index_select(
+            0, torch.as_tensor(val_idx, dtype=torch.long)
+        )
+        y_val_t = self.y_train.index_select(
+            0, torch.as_tensor(val_idx, dtype=torch.long)
+        )
+        g_val = g_train_idx[val_idx]
         return X_fit, y_fit, g_fit, X_val_t, y_val_t, g_val
 
     def _run_epoch(self, loader, loss_computer, training):
