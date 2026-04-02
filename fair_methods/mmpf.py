@@ -353,7 +353,10 @@ class MinimaxParetoFairness(FairMethod):
         train_loader = self._build_loader(X_fit, y_fit, g_fit, train=True)
         val_loader = self._build_loader(X_val_t, y_val_t, g_val, train=False)
 
-        self.model = _MMPFNet(self.input_dim, hidden_units=self.hidden_units).to(device)
+        if self.model_class is None:
+            self.model = _MMPFNet(self.input_dim, hidden_units=self.hidden_units).to(device)
+        else:
+            self.model = self.model_class(self.input_dim, output_dim=2).to(device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         n_groups = len(self.group_values)
