@@ -4,7 +4,6 @@ import os
 import sys
 
 import numpy as np
-import torch
 from folktables import ACSDataSource, ACSIncome
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -145,14 +144,14 @@ def main():
         )
 
     print("[Example] Converting to tensors...", flush=True)
-    X_train_t = torch.from_numpy(prepared.X_train)
-    X_test_t = torch.from_numpy(prepared.X_test)
-    X_train_full_t = torch.from_numpy(prepared.X_train_full)
-    X_test_full_t = torch.from_numpy(prepared.X_test_full)
-    y_train_t = torch.from_numpy(prepared.y_train)
-    y_test_t = torch.from_numpy(prepared.y_test)
-    g_train_t = torch.from_numpy(prepared.g_train)
-    g_test_t = torch.from_numpy(prepared.g_test)
+    X_train_t = prepared.X_train
+    X_test_t = prepared.X_test
+    X_train_full_t = prepared.X_train_full
+    X_test_full_t = prepared.X_test_full
+    y_train_t = prepared.y_train
+    y_test_t = prepared.y_test
+    g_train_t = prepared.g_train
+    g_test_t = prepared.g_test
     del prepared
     gc.collect()
 
