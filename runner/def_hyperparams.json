@@ -1,0 +1,82 @@
+{
+  "baseline": {
+    "lr": 0.001,
+    "epochs": 15,
+    "batch_size": 1024,
+    "seed": 42,
+    "predict_batch_size": 8192
+  },
+  "dro": {
+    "n_epochs": 100,
+    "batch_size": 128,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "alpha": 0.2,
+    "gamma": 0.1,
+    "robust_step_size": 0.01,
+    "generalization_adjustment": 0.0,
+    "automatic_adjustment": false,
+    "use_normalized_loss": false,
+    "btl": false,
+    "minimum_variational_weight": 0.0,
+    "reweight_groups": true,
+    "scheduler": false,
+    "val_fraction": 0.2,
+    "momentum": 0.9,
+    "seed": 42,
+    "n_print": 10,
+    "predict_batch_size": 8192
+  },
+  "maml": {
+    "inner_lr": 0.005,
+    "inner_steps": 5,
+    "meta_epochs": 150,
+    "meta_lr": 0.0003,
+    "k_support": 128,
+    "k_query": 128,
+    "replace": false,
+    "group_budget_divisor": 4,
+    "support_fraction": 0.3333333333333333,
+    "use_full_data": false,
+    "seed": 42,
+    "predict_batch_size": 8192
+  },
+  "reptile": {
+    "inner_lr": 0.005,
+    "inner_steps": 10,
+    "meta_epochs": 200,
+    "meta_lr": 0.003,
+    "meta_lr_final": 0.003,
+    "inner_batch_size": 128,
+    "k_support": 128,
+    "train_k_support": 128,
+    "meta_batch_size": 4,
+    "replace": false,
+    "eval_inner_steps": 10,
+    "eval_inner_batch_size": 128,
+    "seed": 42,
+    "predict_batch_size": 8192
+  },
+  "mmpf": {
+    "lr": 0.0005,
+    "max_epochs": 1000,
+    "batch_size": 32,
+    "niter": 5,
+    "patience": 10,
+    "lrdecay": 0.25,
+    "alpha": 0.5,
+    "k_ini": 1,
+    "k_min": 20,
+    "risk_round_factor": 3,
+    "reset_optimizer": false,
+    "hidden_units": [
+      512,
+      512
+    ],
+    "balanced_sampler": true,
+    "seed": 42,
+    "n_print": 5,
+    "val_fraction": 0.2,
+    "predict_batch_size": 8192
+  }
+}

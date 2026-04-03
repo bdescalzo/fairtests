@@ -4,7 +4,15 @@ This project is a minimal framework for testing different minimax-fairness focus
 
 Fairtests was developed as part of a research internship at the Intelligent Systems Group (ISG) in EHU.
 
-## Usage
+## Usage (full experiments)
+Call ```runner/orchestrator.py``` with the following parameters:
+- `-s AMOUNT_OF_SEEDS`: Amount of times that the experiment will be repeated with different seeds.
+    - If ```-d``` is sent, the seed choice will be deterministic.
+
+- `-m LIST_OF_METHODS`: The list of methods that will be sent, separated by spaces. Available choices on ```fairtests.py```.
+- `-e EXPERIMENT_NAME`: Experiment to run. Available choices at ```runner/experiments/__init__.py```.
+- `-h HYPERPARAMETER_FILE.json`: A JSON file containing the hyperparameters to send to each method.
+## Usage (individual examples)
 
 The ```examples/``` folder contains a few usage examples. The package is straightforward to use:
 1. Build the feature matrix X (samples per-row) and labels array y in numpy. Send them to the preprocesser (```data_tools/preprocessing.py```), which will scale the data and build the eight needed tensors for a full experiment (X/y for train and test, X variants with explicit access to the protected attribute, and a "g" tensor with only the protected labels).
@@ -22,10 +30,9 @@ The ```examples/``` folder contains ```example.py```, which uses the [folktables
 
 ## TODO / Next planned steps
 1. Add more SOTA minimax-fairness learning algorithms found in the literature.
-2. Allow for easier hyperparameter choice, and implement automatic tuning for each method.
-3. Allow for multiple runs with different seeds for cross-validation.
-4. Implement clustering-based methods for MAML.
-5. Implement standardized tests for various specific scenarios.
+2. Implement automatic hyperparameter tuning for each method.
+3. Implement clustering-based methods for MAML.
+4. Implement standardized tests for various specific scenarios.
 
 ## Method attributions
 

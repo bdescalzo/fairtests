@@ -138,6 +138,8 @@ def _run_single_method(
         if model_class is not None:
             constructor_kwargs["model_class"] = model_class
         method = method_spec(**constructor_kwargs)
+    elif callable(method_spec):
+        method = method_spec(model_class=model_class)
     else:
         method = method_spec
         if model_class is not None:
