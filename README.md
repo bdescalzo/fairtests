@@ -7,11 +7,12 @@ Fairtests was developed as part of a research internship at the Intelligent Syst
 ## Usage
 
 The ```examples/``` folder contains a few usage examples. The package is straightforward to use:
-1. For each split (train/test), divide your data in three PyTorch tensors: X, y and g, where g[i] contains the label of the i-th sample for the protected attribute. You should remove the protected attribute from the X tensor.
-    * You can additionally build and pass X_train_full and X_test_full, which will be assumed to contain the protected attribute as an explicit feature. If these are passed as parameters to run_fairtests, some methods will run twice (right now only the baseline ERM), offering the comparison between access and lack thereof to the protected attribute.
+1. Build the feature matrix X (samples per-row) and labels array y in numpy. Send them to the preprocesser (```data_tools/preprocessing.py```), which will scale the data and build the eight needed tensors for a full experiment (X/y for train and test, X variants with explicit access to the protected attribute, and a "g" tensor with only the protected labels).
+    * The preprocesser supports both sending the full data at once and using a using a chunk factory if memory limits require it: check ```example.py``` and ```example_toy.py``` to see the difference.
 
 2. Call fairtests' ```run_fairtests``` method with the tensors and the list of methods to execute. It will return a dictionary with all the metrics per method.
-    * Note that all standard fairness metrics are for the worst pairwise values obtained.
+    * If you pass the X_train_full and X_test_full tensors, all methods will be run twice. Otherwise, only MAML/Reptile will have inference-time access to the protected attribute, due to their nature.
+    * Note that all standard fairness (i.e. non minimax) metrics are for the worst pairwise values obtained.
 
 The ```results_excel.py``` script under examples generates a XLSX file with all the data conveniently formatted in sheets.
 
