@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+import torch
 from sklearn.preprocessing import StandardScaler
 
 
@@ -14,6 +15,19 @@ class PreparedFairSplits:
     y_test: np.ndarray
     g_train: np.ndarray
     g_test: np.ndarray
+
+
+def _to_torch_splits(prepared):
+    return PreparedFairSplits(
+        X_train=torch.from_numpy(prepared.X_train),
+        X_test=torch.from_numpy(prepared.X_test),
+        X_train_full=torch.from_numpy(prepared.X_train_full),
+        X_test_full=torch.from_numpy(prepared.X_test_full),
+        y_train=torch.from_numpy(prepared.y_train),
+        y_test=torch.from_numpy(prepared.y_test),
+        g_train=torch.from_numpy(prepared.g_train),
+        g_test=torch.from_numpy(prepared.g_test),
+    )
 
 
 def _validate_test_size(test_size):
@@ -181,7 +195,8 @@ def prepare_fair_splits_from_arrays(
         g_train=g_train,
         g_test=g_test,
     )
-    return _filter_train_groups(prepared, min_train_group_size)
+    prepared = _filter_train_groups(prepared, min_train_group_size)
+    return _to_torch_splits(prepared)
 
 
 def prepare_fair_splits_from_chunks(
@@ -333,4 +348,5 @@ def prepare_fair_splits_from_chunks(
         g_train=g_train,
         g_test=g_test,
     )
-    return _filter_train_groups(prepared, min_train_group_size)
+    prepared = _filter_train_groups(prepared, min_train_group_size)
+    return _to_torch_splits(prepared)
