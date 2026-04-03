@@ -80,7 +80,7 @@ def _num_rows(array_like):
     return len(array_like)
 
 
-def _validate_full_baseline_inputs(X_train, X_test, X_train_full, X_test_full):
+def _validate_full_inputs(X_train, X_test, X_train_full, X_test_full):
     has_train_full = X_train_full is not None
     has_test_full = X_test_full is not None
     if has_train_full != has_test_full:
@@ -99,20 +99,16 @@ def _validate_full_baseline_inputs(X_train, X_test, X_train_full, X_test_full):
     return True
 
 
-def _is_baseline_method(method_name, method_spec):
-    if method_name == "baseline":
-        return True
-    if isinstance(method_spec, type):
-        return issubclass(method_spec, Baseline)
-    return isinstance(method_spec, Baseline)
-
-
-def _resolve_full_baseline_name(existing_names):
-    for candidate in ("baseline_full", "baseline_full_input", "baseline_protected"):
+def _resolve_full_method_name(method_name, existing_names):
+    for candidate in (
+        f"{method_name}_full",
+        f"{method_name}_full_input",
+        f"{method_name}_protected",
+    ):
         if candidate not in existing_names:
             return candidate
     raise ValueError(
-        "Could not assign a unique results key for the full-input baseline."
+        f"Could not assign a unique results key for the full-input variant of '{method_name}'."
     )
 
 
@@ -213,25 +209,17 @@ def run_fairtests(
         model_class = GenericModel
     _LAST_HYPERPARAMS = {}
     methods = _resolve_methods(methods=methods, method_names=method_names)
-    has_full_baseline_inputs = _validate_full_baseline_inputs(
+    has_full_inputs = _validate_full_inputs(
         X_train, X_test, X_train_full, X_test_full
     )
 
     results = {}
-    baseline_method_names = [
-        name for name, method_spec in methods.items() if _is_baseline_method(name, method_spec)
-    ]
-    if len(baseline_method_names) > 1 and has_full_baseline_inputs:
-        raise ValueError(
-            "Full-input baseline comparison is ambiguous when multiple baseline methods "
-            "are selected."
-        )
-
-    full_baseline_name = None
-    full_baseline_target = None
-    if has_full_baseline_inputs and baseline_method_names:
-        full_baseline_name = _resolve_full_baseline_name(set(methods.keys()))
-        full_baseline_target = baseline_method_names[0]
+    full_method_names = {}
+    if has_full_inputs:
+        existing_names = set(methods.keys())
+        for name in methods:
+            full_method_names[name] = _resolve_full_method_name(name, existing_names)
+            existing_names.add(full_method_names[name])
 
     for name, method_spec in methods.items():
         results[name], _LAST_HYPERPARAMS[name] = _run_single_method(
@@ -249,12 +237,13 @@ def run_fairtests(
             model_class=model_class,
         )
 
-        if full_baseline_name is not None and name == full_baseline_target:
+        if has_full_inputs:
+            full_method_name = full_method_names[name]
             (
-                results[full_baseline_name],
-                _LAST_HYPERPARAMS[full_baseline_name],
+                results[full_method_name],
+                _LAST_HYPERPARAMS[full_method_name],
             ) = _run_single_method(
-                method_name=full_baseline_name,
+                method_name=full_method_name,
                 method_spec=method_spec,
                 X_train=X_train_full,
                 y_train=y_train,
