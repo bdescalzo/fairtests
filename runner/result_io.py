@@ -1,10 +1,15 @@
 import json
 import math
 import os
+import re
 from numbers import Real
 
+import matplotlib
 import numpy as np
 import pandas as pd
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 def _normalize_excel_value(value):
@@ -120,6 +125,124 @@ def write_json(data, output_path):
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(_to_json_ready(data), f, indent=2, sort_keys=True)
     return output_path
+
+
+def _safe_filename(name):
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("._")
+    return sanitized or "item"
+
+
+def _write_roc_plot(curve_data, method_name, output_path):
+    fig, ax = plt.subplots(figsize=(6, 4))
+    fpr = np.asarray(curve_data.get("fpr", []), dtype=np.float64)
+    tpr = np.asarray(curve_data.get("tpr", []), dtype=np.float64)
+    auc = curve_data.get("auc")
+    has_roc_line = False
+
+    if fpr.size and tpr.size and not (np.isnan(fpr).all() or np.isnan(tpr).all()):
+        label = (
+            f"ROC (AUC = {auc:.4f})"
+            if isinstance(auc, Real) and not (math.isnan(auc) or math.isinf(auc))
+            else "ROC (AUC undefined)"
+        )
+        ax.plot(fpr, tpr, linewidth=2, label=label)
+        has_roc_line = True
+    else:
+        ax.text(
+            0.5,
+            0.5,
+            "ROC undefined for this run",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+
+    ax.plot([0.0, 1.0], [0.0, 1.0], linestyle="--", linewidth=1, color="0.6")
+    ax.set_title(f"{method_name}: ROC Curve")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid(True, alpha=0.3)
+    if has_roc_line:
+        ax.legend(loc="lower right")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
+def _write_accuracy_sweep_plot(curve_data, method_name, output_path):
+    fig, ax = plt.subplots(figsize=(6, 4))
+    thresholds = np.asarray(curve_data.get("thresholds", []), dtype=np.float64)
+    accuracy = np.asarray(curve_data.get("accuracy", []), dtype=np.float64)
+    worst_group_accuracy = np.asarray(
+        curve_data.get("worst_group_accuracy", []), dtype=np.float64
+    )
+
+    if thresholds.size and accuracy.size:
+        ax.plot(thresholds, accuracy, linewidth=2, label="Accuracy")
+    if thresholds.size and worst_group_accuracy.size:
+        ax.plot(
+            thresholds,
+            worst_group_accuracy,
+            linewidth=2,
+            label="Worst-Group Accuracy",
+        )
+
+    if not ax.lines:
+        ax.text(
+            0.5,
+            0.5,
+            "Threshold sweep unavailable",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+
+    ax.set_title(f"{method_name}: Accuracy vs Threshold")
+    ax.set_xlabel("Decision Threshold")
+    ax.set_ylabel("Accuracy")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid(True, alpha=0.3)
+    if ax.lines:
+        ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
+def write_curve_artifacts(results, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    artifact_paths = {}
+
+    for method_name, payload in results.items():
+        curves = payload.get("curves")
+        if not curves:
+            continue
+
+        method_dir = os.path.join(output_dir, _safe_filename(method_name))
+        os.makedirs(method_dir, exist_ok=True)
+
+        roc_path = os.path.join(method_dir, "roc.png")
+        accuracy_path = os.path.join(method_dir, "accuracy_threshold_sweep.png")
+        curves_json_path = os.path.join(method_dir, "curve_points.json")
+
+        _write_roc_plot(curves.get("roc", {}), method_name, roc_path)
+        _write_accuracy_sweep_plot(
+            curves.get("accuracy_threshold_sweep", {}),
+            method_name,
+            accuracy_path,
+        )
+        write_json(curves, curves_json_path)
+
+        artifact_paths[method_name] = {
+            "roc_plot": roc_path,
+            "accuracy_plot": accuracy_path,
+            "curve_points": curves_json_path,
+        }
+
+    return artifact_paths
 
 
 def write_results_xlsx(results, output_path):

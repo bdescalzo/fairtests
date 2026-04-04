@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from fair_methods import Baseline, GroupDRO, MetaLearning, MinimaxParetoFairness, Reptile
+from metrics.curves import compute_threshold_curve_bundle
 from metrics.metrics import StandardMetrics, FairnessMetrics
 from models import GenericModel
 
@@ -166,11 +167,17 @@ def _run_single_method(
             sensitive_test,
             threshold=threshold,
         ).compute()
+        curves = compute_threshold_curve_bundle(
+            y_test,
+            y_prob,
+            sensitive_test,
+        )
 
         result = {
             "overall": overall_metrics,
             "by_group": group_metrics,
             "fairness": fairness,
+            "curves": curves,
         }
         if store_predictions:
             result["y_prob"] = y_prob

@@ -13,6 +13,7 @@ if ROOT_DIR not in sys.path:
 from runner.experiments import AVAILABLE_EXPERIMENTS, get_experiment_class
 from runner.result_io import (
     aggregate_results,
+    write_curve_artifacts,
     write_hyperparams_xlsx,
     write_json,
     write_results_xlsx,
@@ -141,6 +142,9 @@ def main():
         results, used_hyperparams = experiment.run()
         seed_results.append(results)
 
+        curve_artifacts = write_curve_artifacts(
+            results, os.path.join(seed_dir, "plots")
+        )
         write_results_xlsx(results, os.path.join(seed_dir, "results.xlsx"))
         write_hyperparams_xlsx(
             used_hyperparams, os.path.join(seed_dir, "hyperparams.xlsx")
@@ -151,6 +155,7 @@ def main():
                 "seed": seed,
                 "methods": args.method,
                 "results": results,
+                "curve_artifacts": curve_artifacts,
             },
             os.path.join(seed_dir, "results.json"),
         )
