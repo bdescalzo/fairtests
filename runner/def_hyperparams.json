@@ -3,7 +3,6 @@
     "lr": 0.001,
     "epochs": 15,
     "batch_size": 1024,
-    "seed": 42,
     "predict_batch_size": 8192
   },
   "dro": {
@@ -23,7 +22,6 @@
     "scheduler": false,
     "val_fraction": 0.2,
     "momentum": 0.9,
-    "seed": 42,
     "n_print": 10,
     "predict_batch_size": 8192
   },
@@ -38,7 +36,6 @@
     "group_budget_divisor": 4,
     "support_fraction": 0.3333333333333333,
     "use_full_data": false,
-    "seed": 42,
     "predict_batch_size": 8192
   },
   "reptile": {
@@ -54,7 +51,6 @@
     "replace": false,
     "eval_inner_steps": 10,
     "eval_inner_batch_size": 128,
-    "seed": 42,
     "predict_batch_size": 8192
   },
   "mmpf": {
@@ -69,12 +65,7 @@
     "k_min": 20,
     "risk_round_factor": 3,
     "reset_optimizer": false,
-    "hidden_units": [
-      512,
-      512
-    ],
     "balanced_sampler": true,
-    "seed": 42,
     "n_print": 5,
     "val_fraction": 0.2,
     "predict_batch_size": 8192
