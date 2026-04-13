@@ -11,6 +11,8 @@ class PreparedFairSplits:
     X_test: np.ndarray
     X_train_full: np.ndarray
     X_test_full: np.ndarray
+    X_train_onehot: np.ndarray
+    X_test_onehot: np.ndarray
     y_train: np.ndarray
     y_test: np.ndarray
     g_train: np.ndarray
@@ -23,6 +25,8 @@ def _to_torch_splits(prepared):
         X_test=torch.from_numpy(prepared.X_test),
         X_train_full=torch.from_numpy(prepared.X_train_full),
         X_test_full=torch.from_numpy(prepared.X_test_full),
+        X_train_onehot=torch.from_numpy(prepared.X_train_onehot),
+        X_test_onehot=torch.from_numpy(prepared.X_test_onehot),
         y_train=torch.from_numpy(prepared.y_train),
         y_test=torch.from_numpy(prepared.y_test),
         g_train=torch.from_numpy(prepared.g_train),
@@ -112,6 +116,24 @@ def _fit_standard_scalers(X_train, X_train_full):
     return scaler, scaler_full
 
 
+def _encode_sensitive_onehot(g, categories):
+    g = np.asarray(g, dtype=np.int64)
+    categories = np.asarray(categories, dtype=np.int64)
+    positions = np.searchsorted(categories, g)
+    if np.any(positions >= categories.size) or not np.array_equal(categories[positions], g):
+        raise ValueError("Sensitive labels contain values outside the known category set.")
+
+    onehot = np.zeros((g.shape[0], categories.size), dtype=np.float32)
+    onehot[np.arange(g.shape[0]), positions] = 1.0
+    return onehot
+
+
+def _build_onehot_features(X, g, categories):
+    X = np.asarray(X, dtype=np.float32)
+    onehot = _encode_sensitive_onehot(g, categories)
+    return np.concatenate((X, onehot), axis=1).astype(np.float32, copy=False)
+
+
 def _scale_chunk(X_chunk, mean, scale):
     X_chunk = X_chunk.astype(np.float32, copy=False)
     X_chunk -= mean
@@ -140,6 +162,8 @@ def _filter_train_groups(prepared, min_train_group_size):
         X_test=prepared.X_test,
         X_train_full=prepared.X_train_full[valid_mask],
         X_test_full=prepared.X_test_full,
+        X_train_onehot=prepared.X_train_onehot[valid_mask],
+        X_test_onehot=prepared.X_test_onehot,
         y_train=prepared.y_train[valid_mask],
         y_test=prepared.y_test,
         g_train=prepared.g_train[valid_mask],
@@ -178,18 +202,27 @@ def prepare_fair_splits_from_arrays(
     y_test = y[test_mask]
     g_train = g[train_mask]
     g_test = g[test_mask]
+    group_categories = np.unique(g)
+    X_train_onehot = _build_onehot_features(X_train, g_train, group_categories)
+    X_test_onehot = _build_onehot_features(X_test, g_test, group_categories)
 
     scaler, scaler_full = _fit_standard_scalers(X_train, X_train_full)
+    scaler_onehot = StandardScaler()
+    scaler_onehot.fit(X_train_onehot)
     X_train = scaler.transform(X_train).astype(np.float32, copy=False)
     X_test = scaler.transform(X_test).astype(np.float32, copy=False)
     X_train_full = scaler_full.transform(X_train_full).astype(np.float32, copy=False)
     X_test_full = scaler_full.transform(X_test_full).astype(np.float32, copy=False)
+    X_train_onehot = scaler_onehot.transform(X_train_onehot).astype(np.float32, copy=False)
+    X_test_onehot = scaler_onehot.transform(X_test_onehot).astype(np.float32, copy=False)
 
     prepared = PreparedFairSplits(
         X_train=X_train,
         X_test=X_test,
         X_train_full=X_train_full,
         X_test_full=X_test_full,
+        X_train_onehot=X_train_onehot,
+        X_test_onehot=X_test_onehot,
         y_train=y_train,
         y_test=y_test,
         g_train=g_train,
@@ -214,8 +247,11 @@ def prepare_fair_splits_from_chunks(
     test_size = _validate_test_size(test_size)
     scaler = StandardScaler()
     scaler_full = StandardScaler()
+    group_categories = set()
 
-    print("[Preprocessing] Pass 1/2: fitting scaler on streamed training split...")
+    print(
+        "[Preprocessing] Pass 1/2: fitting base/full scalers and collecting sensitive categories..."
+    )
     rng = np.random.default_rng(seed)
     train_rows = 0
     test_rows = 0
@@ -254,6 +290,7 @@ def prepare_fair_splits_from_chunks(
             y_chunk, g_chunk, test_size, rng
         )
         train_mask = ~test_mask
+        group_categories.update(np.unique(g_chunk).tolist())
 
         if np.any(train_mask):
             scaler.partial_fit(X_chunk[train_mask])
@@ -264,6 +301,9 @@ def prepare_fair_splits_from_chunks(
 
     if feature_dim is None or feature_dim_full is None or train_rows == 0 or test_rows == 0:
         raise RuntimeError("Could not build non-empty train/test splits from the chunks.")
+
+    group_categories = np.asarray(sorted(group_categories), dtype=np.int64)
+    onehot_dim = feature_dim + group_categories.size
 
     mean = scaler.mean_.astype(np.float32, copy=False)
     scale = scaler.scale_.astype(np.float32, copy=False)
@@ -279,11 +319,13 @@ def prepare_fair_splits_from_chunks(
 
     X_train = np.empty((train_rows, feature_dim), dtype=np.float32)
     X_train_full = np.empty((train_rows, feature_dim_full), dtype=np.float32)
+    X_train_onehot = np.empty((train_rows, onehot_dim), dtype=np.float32)
     y_train = np.empty(train_rows, dtype=np.float32)
     g_train = np.empty(train_rows, dtype=np.int64)
 
     X_test = np.empty((test_rows, feature_dim), dtype=np.float32)
     X_test_full = np.empty((test_rows, feature_dim_full), dtype=np.float32)
+    X_test_onehot = np.empty((test_rows, onehot_dim), dtype=np.float32)
     y_test = np.empty(test_rows, dtype=np.float32)
     g_test = np.empty(test_rows, dtype=np.int64)
 
@@ -314,8 +356,12 @@ def prepare_fair_splits_from_chunks(
             X_train_full_chunk = _scale_chunk(
                 X_full_chunk[train_mask], mean_full, scale_full
             )
+            X_train_onehot_chunk = _build_onehot_features(
+                X_chunk[train_mask], g_chunk[train_mask], group_categories
+            )
             X_train[train_ptr : train_ptr + n_train] = X_train_chunk
             X_train_full[train_ptr : train_ptr + n_train] = X_train_full_chunk
+            X_train_onehot[train_ptr : train_ptr + n_train] = X_train_onehot_chunk
             y_train[train_ptr : train_ptr + n_train] = y_chunk[train_mask]
             g_train[train_ptr : train_ptr + n_train] = g_chunk[train_mask]
             train_ptr += n_train
@@ -326,8 +372,12 @@ def prepare_fair_splits_from_chunks(
             X_test_full_chunk = _scale_chunk(
                 X_full_chunk[test_mask], mean_full, scale_full
             )
+            X_test_onehot_chunk = _build_onehot_features(
+                X_chunk[test_mask], g_chunk[test_mask], group_categories
+            )
             X_test[test_ptr : test_ptr + n_test] = X_test_chunk
             X_test_full[test_ptr : test_ptr + n_test] = X_test_full_chunk
+            X_test_onehot[test_ptr : test_ptr + n_test] = X_test_onehot_chunk
             y_test[test_ptr : test_ptr + n_test] = y_chunk[test_mask]
             g_test[test_ptr : test_ptr + n_test] = g_chunk[test_mask]
             test_ptr += n_test
@@ -338,11 +388,21 @@ def prepare_fair_splits_from_chunks(
             f"(train {train_ptr}/{train_rows}, test {test_ptr}/{test_rows})."
         )
 
+    scaler_onehot = StandardScaler()
+    X_train_onehot = scaler_onehot.fit_transform(X_train_onehot).astype(
+        np.float32, copy=False
+    )
+    X_test_onehot = scaler_onehot.transform(X_test_onehot).astype(
+        np.float32, copy=False
+    )
+
     prepared = PreparedFairSplits(
         X_train=X_train,
         X_test=X_test,
         X_train_full=X_train_full,
         X_test_full=X_test_full,
+        X_train_onehot=X_train_onehot,
+        X_test_onehot=X_test_onehot,
         y_train=y_train,
         y_test=y_test,
         g_train=g_train,
