@@ -81,35 +81,58 @@ def _num_rows(array_like):
     return len(array_like)
 
 
-def _validate_full_inputs(X_train, X_test, X_train_full, X_test_full):
-    has_train_full = X_train_full is not None
-    has_test_full = X_test_full is not None
-    if has_train_full != has_test_full:
+def _validate_input_variant(
+    X_train,
+    X_test,
+    X_train_variant,
+    X_test_variant,
+    variant_name,
+):
+    has_train_variant = X_train_variant is not None
+    has_test_variant = X_test_variant is not None
+    if has_train_variant != has_test_variant:
         raise ValueError(
-            "X_train_full and X_test_full must either both be provided or both be omitted."
+            f"X_train_{variant_name} and X_test_{variant_name} must either both be "
+            "provided or both be omitted."
         )
 
-    if not has_train_full:
+    if not has_train_variant:
         return False
 
-    if _num_rows(X_train_full) != _num_rows(X_train):
-        raise ValueError("X_train_full must have the same number of rows as X_train.")
-    if _num_rows(X_test_full) != _num_rows(X_test):
-        raise ValueError("X_test_full must have the same number of rows as X_test.")
+    if _num_rows(X_train_variant) != _num_rows(X_train):
+        raise ValueError(
+            f"X_train_{variant_name} must have the same number of rows as X_train."
+        )
+    if _num_rows(X_test_variant) != _num_rows(X_test):
+        raise ValueError(
+            f"X_test_{variant_name} must have the same number of rows as X_test."
+        )
 
     return True
 
 
-def _resolve_full_method_name(method_name, existing_names):
-    for candidate in (
-        f"{method_name}_full",
-        f"{method_name}_full_input",
-        f"{method_name}_protected",
-    ):
+def _resolve_variant_method_name(method_name, existing_names, variant_name):
+    if variant_name == "full":
+        candidates = (
+            f"{method_name}_full",
+            f"{method_name}_full_input",
+            f"{method_name}_protected",
+        )
+    elif variant_name == "one_hot":
+        candidates = (
+            f"{method_name}_one_hot",
+            f"{method_name}_onehot",
+            f"{method_name}_protected_one_hot",
+        )
+    else:
+        raise ValueError(f"Unsupported input variant '{variant_name}'.")
+
+    for candidate in candidates:
         if candidate not in existing_names:
             return candidate
     raise ValueError(
-        f"Could not assign a unique results key for the full-input variant of '{method_name}'."
+        f"Could not assign a unique results key for the {variant_name} variant of "
+        f"'{method_name}'."
     )
 
 
@@ -208,6 +231,8 @@ def run_fairtests(
     seed=42,
     X_train_full=None,
     X_test_full=None,
+    X_train_onehot=None,
+    X_test_onehot=None,
     model_class=None,
 ):
     global _LAST_HYPERPARAMS
@@ -218,17 +243,41 @@ def run_fairtests(
         model_class = GenericModel
     _LAST_HYPERPARAMS = {}
     methods = _resolve_methods(methods=methods, method_names=method_names)
-    has_full_inputs = _validate_full_inputs(
-        X_train, X_test, X_train_full, X_test_full
+    has_full_inputs = _validate_input_variant(
+        X_train,
+        X_test,
+        X_train_full,
+        X_test_full,
+        "full",
+    )
+    has_one_hot_inputs = _validate_input_variant(
+        X_train,
+        X_test,
+        X_train_onehot,
+        X_test_onehot,
+        "one_hot",
     )
 
     results = {}
     full_method_names = {}
+    one_hot_method_names = {}
     if has_full_inputs:
         existing_names = set(methods.keys())
         for name in methods:
-            full_method_names[name] = _resolve_full_method_name(name, existing_names)
+            full_method_names[name] = _resolve_variant_method_name(
+                name, existing_names, "full"
+            )
             existing_names.add(full_method_names[name])
+    else:
+        existing_names = set(methods.keys())
+
+    if has_one_hot_inputs:
+        existing_names.update(full_method_names.values())
+        for name in methods:
+            one_hot_method_names[name] = _resolve_variant_method_name(
+                name, existing_names, "one_hot"
+            )
+            existing_names.add(one_hot_method_names[name])
 
     for name, method_spec in methods.items():
         results[name], _LAST_HYPERPARAMS[name] = _run_single_method(
@@ -257,6 +306,26 @@ def run_fairtests(
                 X_train=X_train_full,
                 y_train=y_train,
                 X_test=X_test_full,
+                y_test=y_test,
+                sensitive_train=sensitive_train,
+                sensitive_test=sensitive_test,
+                threshold=threshold,
+                store_predictions=store_predictions,
+                seed=seed,
+                model_class=model_class,
+            )
+
+        if has_one_hot_inputs:
+            one_hot_method_name = one_hot_method_names[name]
+            (
+                results[one_hot_method_name],
+                _LAST_HYPERPARAMS[one_hot_method_name],
+            ) = _run_single_method(
+                method_name=one_hot_method_name,
+                method_spec=method_spec,
+                X_train=X_train_onehot,
+                y_train=y_train,
+                X_test=X_test_onehot,
                 y_test=y_test,
                 sensitive_train=sensitive_train,
                 sensitive_test=sensitive_test,

@@ -63,6 +63,8 @@ def main():
     X_test_t = prepared.X_test
     X_train_full_t = prepared.X_train_full
     X_test_full_t = prepared.X_test_full
+    X_train_onehot_t = prepared.X_train_onehot
+    X_test_onehot_t = prepared.X_test_onehot
     y_train_t = prepared.y_train
     y_test_t = prepared.y_test
     g_train_t = prepared.g_train
@@ -80,6 +82,8 @@ def main():
         g_test_t,
         X_train_full=X_train_full_t,
         X_test_full=X_test_full_t,
+        X_train_onehot=X_train_onehot_t,
+        X_test_onehot=X_test_onehot_t,
         model_class=base_model_class,
     )
     hyperparams = get_hyperparams()
