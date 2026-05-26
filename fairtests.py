@@ -84,12 +84,15 @@ def _num_rows(array_like):
 def _validate_input_variant(
     X_train,
     X_test,
+    X_val,
     X_train_variant,
     X_test_variant,
+    X_val_variant,
     variant_name,
 ):
     has_train_variant = X_train_variant is not None
     has_test_variant = X_test_variant is not None
+    has_val_variant = X_val_variant is not None
     if has_train_variant != has_test_variant:
         raise ValueError(
             f"X_train_{variant_name} and X_test_{variant_name} must either both be "
@@ -97,6 +100,11 @@ def _validate_input_variant(
         )
 
     if not has_train_variant:
+        if has_val_variant:
+            raise ValueError(
+                f"X_val_{variant_name} cannot be provided unless X_train_{variant_name} "
+                f"and X_test_{variant_name} are also provided."
+            )
         return False
 
     if _num_rows(X_train_variant) != _num_rows(X_train):
@@ -107,7 +115,39 @@ def _validate_input_variant(
         raise ValueError(
             f"X_test_{variant_name} must have the same number of rows as X_test."
         )
+    if X_val is not None:
+        if not has_val_variant:
+            raise ValueError(
+                f"X_val_{variant_name} must be provided when X_val is provided."
+            )
+        if _num_rows(X_val_variant) != _num_rows(X_val):
+            raise ValueError(
+                f"X_val_{variant_name} must have the same number of rows as X_val."
+            )
+    elif has_val_variant:
+        raise ValueError(
+            f"X_val_{variant_name} cannot be provided unless X_val is provided."
+        )
 
+    return True
+
+
+def _validate_validation_split(X_train, y_train, X_val, y_val, sensitive_val):
+    has_any_val = X_val is not None or y_val is not None or sensitive_val is not None
+    if not has_any_val:
+        return False
+    if X_val is None or y_val is None or sensitive_val is None:
+        raise ValueError(
+            "X_val, y_val, and sensitive_val must either all be provided or all be omitted."
+        )
+    if _num_rows(y_val) != _num_rows(X_val):
+        raise ValueError("y_val must have the same number of rows as X_val.")
+    if _num_rows(sensitive_val) != _num_rows(X_val):
+        raise ValueError("sensitive_val must have the same number of rows as X_val.")
+    if _num_rows(X_val) == 0:
+        raise ValueError("X_val must not be empty.")
+    if _num_rows(X_train) == 0 or _num_rows(y_train) == 0:
+        raise ValueError("Training inputs must not be empty.")
     return True
 
 
@@ -148,9 +188,12 @@ def _run_single_method(
     X_train,
     y_train,
     X_test,
+    X_val,
+    y_val,
     y_test,
     sensitive_train,
     sensitive_test,
+    sensitive_val,
     threshold,
     store_predictions,
     seed,
@@ -175,8 +218,8 @@ def _run_single_method(
     )
     try:
         print(f"[Fairtest] Running method: {method_name}")
-        method.load_data(X_train, y_train, X_test)
-        method.fit(sensitive_train)
+        method.load_data(X_train, y_train, X_test, X_val=X_val, y_val=y_val)
+        method.fit(sensitive_train, sensitive_val=sensitive_val)
 
         y_prob = method.predict(sensitive_labels=sensitive_test)
 
@@ -234,6 +277,11 @@ def run_fairtests(
     X_train_onehot=None,
     X_test_onehot=None,
     model_class=None,
+    X_val=None,
+    y_val=None,
+    sensitive_val=None,
+    X_val_full=None,
+    X_val_onehot=None,
 ):
     global _LAST_HYPERPARAMS
     print("[Fairtest] Starting evaluation pipeline.")
@@ -243,18 +291,29 @@ def run_fairtests(
         model_class = GenericModel
     _LAST_HYPERPARAMS = {}
     methods = _resolve_methods(methods=methods, method_names=method_names)
+    has_validation_split = _validate_validation_split(
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        sensitive_val,
+    )
     has_full_inputs = _validate_input_variant(
         X_train,
         X_test,
+        X_val,
         X_train_full,
         X_test_full,
+        X_val_full,
         "full",
     )
     has_one_hot_inputs = _validate_input_variant(
         X_train,
         X_test,
+        X_val,
         X_train_onehot,
         X_test_onehot,
+        X_val_onehot,
         "one_hot",
     )
 
@@ -286,9 +345,12 @@ def run_fairtests(
             X_train=X_train,
             y_train=y_train,
             X_test=X_test,
+            X_val=X_val if has_validation_split else None,
+            y_val=y_val if has_validation_split else None,
             y_test=y_test,
             sensitive_train=sensitive_train,
             sensitive_test=sensitive_test,
+            sensitive_val=sensitive_val if has_validation_split else None,
             threshold=threshold,
             store_predictions=store_predictions,
             seed=seed,
@@ -306,9 +368,12 @@ def run_fairtests(
                 X_train=X_train_full,
                 y_train=y_train,
                 X_test=X_test_full,
+                X_val=X_val_full if has_validation_split else None,
+                y_val=y_val if has_validation_split else None,
                 y_test=y_test,
                 sensitive_train=sensitive_train,
                 sensitive_test=sensitive_test,
+                sensitive_val=sensitive_val if has_validation_split else None,
                 threshold=threshold,
                 store_predictions=store_predictions,
                 seed=seed,
@@ -326,9 +391,12 @@ def run_fairtests(
                 X_train=X_train_onehot,
                 y_train=y_train,
                 X_test=X_test_onehot,
+                X_val=X_val_onehot if has_validation_split else None,
+                y_val=y_val if has_validation_split else None,
                 y_test=y_test,
                 sensitive_train=sensitive_train,
                 sensitive_test=sensitive_test,
+                sensitive_val=sensitive_val if has_validation_split else None,
                 threshold=threshold,
                 store_predictions=store_predictions,
                 seed=seed,

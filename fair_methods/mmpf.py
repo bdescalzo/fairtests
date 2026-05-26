@@ -120,6 +120,8 @@ class MinimaxParetoFairness(FairMethod):
         self.X_train = None
         self.y_train = None
         self.X_test = None
+        self.X_val = None
+        self.y_val = None
 
         self.input_dim = None
         self.mu_penalty = None
@@ -148,11 +150,13 @@ class MinimaxParetoFairness(FairMethod):
             predict_batch_size=self.predict_batch_size,
         )
 
-    def load_data(self, X_train, y_train, X_test):
+    def load_data(self, X_train, y_train, X_test, X_val=None, y_val=None):
         # Keep the full dataset on CPU and stream mini-batches to device.
         self.X_train = X_train.float().cpu()
         self.y_train = y_train.long().cpu()
         self.X_test = X_test.float().cpu()
+        self.X_val = X_val.float().cpu() if X_val is not None else None
+        self.y_val = y_val.long().cpu() if y_val is not None else None
         self.input_dim = self.X_train.shape[1]
         self.datos_cargados = True
 
@@ -181,6 +185,19 @@ class MinimaxParetoFairness(FairMethod):
         self.group_to_index = {g: i for i, g in enumerate(self.group_values)}
         mapped = np.array([self.group_to_index[g] for g in sensitive], dtype=np.int64)
         return mapped
+
+    def _map_validation_groups(self, sensitive_labels):
+        sensitive = np.asarray(sensitive_labels)
+        known_mask = np.isin(sensitive, self.group_values)
+        if not np.any(known_mask):
+            raise ValueError(
+                "External MMPF validation split has no samples from training groups."
+            )
+        mapped = np.array(
+            [self.group_to_index[g] for g in sensitive[known_mask]],
+            dtype=np.int64,
+        )
+        return known_mask, mapped
 
     @staticmethod
     def _to_one_hot_binary(y):
@@ -351,20 +368,44 @@ class MinimaxParetoFairness(FairMethod):
         )
         g_train_idx = self._make_group_map(s_train)
 
-        if not (0.0 < self.val_fraction < 1.0):
-            raise ValueError("val_fraction must be strictly between 0 and 1")
-
-        tr_ids, val_ids = _groupwise_train_val_split(
-            g_train_idx, self.val_fraction, self.rng
+        sensitive_val = kwargs.get("sensitive_val")
+        has_external_val = (
+            self.X_val is not None
+            and self.y_val is not None
+            and sensitive_val is not None
         )
 
-        X_fit = self.X_train[tr_ids]
-        y_fit = self.y_train[tr_ids]
-        g_fit = g_train_idx[tr_ids]
+        if has_external_val:
+            s_val = (
+                sensitive_val.detach().cpu().numpy()
+                if isinstance(sensitive_val, torch.Tensor)
+                else np.asarray(sensitive_val)
+            )
+            known_val_mask, g_val = self._map_validation_groups(s_val)
+            known_val_ids = torch.as_tensor(
+                np.flatnonzero(known_val_mask),
+                dtype=torch.long,
+            )
+            X_fit = self.X_train
+            y_fit = self.y_train
+            g_fit = g_train_idx
+            X_val_t = self.X_val.index_select(0, known_val_ids)
+            y_val_t = self.y_val.index_select(0, known_val_ids)
+        else:
+            if not (0.0 < self.val_fraction < 1.0):
+                raise ValueError("val_fraction must be strictly between 0 and 1")
 
-        X_val_t = self.X_train[val_ids]
-        y_val_t = self.y_train[val_ids]
-        g_val = g_train_idx[val_ids]
+            tr_ids, val_ids = _groupwise_train_val_split(
+                g_train_idx, self.val_fraction, self.rng
+            )
+
+            X_fit = self.X_train[tr_ids]
+            y_fit = self.y_train[tr_ids]
+            g_fit = g_train_idx[tr_ids]
+
+            X_val_t = self.X_train[val_ids]
+            y_val_t = self.y_train[val_ids]
+            g_val = g_train_idx[val_ids]
 
         if X_fit.shape[0] == 0 or X_val_t.shape[0] == 0:
             raise ValueError("No hay suficientes datos tras construir train/val para MMPF")

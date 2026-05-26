@@ -348,6 +348,8 @@ class GroupDRO(FairMethod):
         self.X_train = None
         self.y_train = None
         self.X_test = None
+        self.X_val = None
+        self.y_val = None
         self._set_hyperparams(
             n_epochs=self.n_epochs,
             batch_size=self.batch_size,
@@ -370,10 +372,12 @@ class GroupDRO(FairMethod):
             predict_batch_size=self.predict_batch_size,
         )
 
-    def load_data(self, X_train, y_train, X_test):
+    def load_data(self, X_train, y_train, X_test, X_val=None, y_val=None):
         self.X_train = X_train.float().cpu()
         self.y_train = y_train.float().cpu()
         self.X_test = X_test.float().cpu()
+        self.X_val = X_val.float().cpu() if X_val is not None else None
+        self.y_val = y_val.float().cpu() if y_val is not None else None
         self.input_dim = int(self.X_train.shape[1])
         self.datos_cargados = True
 
@@ -382,6 +386,19 @@ class GroupDRO(FairMethod):
         self.group_values = np.unique(sensitive)
         self.group_to_index = {g: i for i, g in enumerate(self.group_values)}
         return np.array([self.group_to_index[g] for g in sensitive], dtype=np.int64)
+
+    def _map_validation_groups(self, sensitive_labels):
+        sensitive = np.asarray(sensitive_labels)
+        known_mask = np.isin(sensitive, self.group_values)
+        if not np.any(known_mask):
+            raise ValueError(
+                "External DRO validation split has no samples from training groups."
+            )
+        mapped = np.array(
+            [self.group_to_index[g] for g in sensitive[known_mask]],
+            dtype=np.int64,
+        )
+        return known_mask, mapped
 
     def _build_loader(self, X, y, group_idx, train):
         dataset = TensorDataset(
@@ -442,6 +459,26 @@ class GroupDRO(FairMethod):
         g_val = g_train_idx[val_idx]
         return X_fit, y_fit, g_fit, X_val_t, y_val_t, g_val
 
+    def _prepare_external_validation_split(self, g_train_idx, sensitive_val):
+        sensitive_val_np = (
+            sensitive_val.detach().cpu().numpy()
+            if isinstance(sensitive_val, torch.Tensor)
+            else np.asarray(sensitive_val)
+        )
+        known_val_mask, g_val = self._map_validation_groups(sensitive_val_np)
+        known_val_ids = torch.as_tensor(
+            np.flatnonzero(known_val_mask),
+            dtype=torch.long,
+        )
+        return (
+            self.X_train,
+            self.y_train,
+            g_train_idx,
+            self.X_val.index_select(0, known_val_ids),
+            self.y_val.index_select(0, known_val_ids),
+            g_val,
+        )
+
     def _run_epoch(self, loader, loss_computer, training):
         self.model.train(mode=training)
         pin_memory = device == "cuda"
@@ -475,8 +512,6 @@ class GroupDRO(FairMethod):
             raise ValueError("n_epochs must be > 0")
         if self.batch_size <= 0:
             raise ValueError("batch_size must be > 0")
-        if not (0.0 < self.val_fraction < 1.0):
-            raise ValueError("val_fraction must be strictly between 0 and 1")
 
         torch.manual_seed(self.seed)
         if torch.cuda.is_available():
@@ -491,9 +526,33 @@ class GroupDRO(FairMethod):
         )
         g_train_idx = self._make_group_map(sensitive_np)
 
-        X_fit, y_fit, g_fit, X_val_t, y_val_t, g_val = self._prepare_fit_and_val_splits(
-            g_train_idx
+        sensitive_val = kwargs.get("sensitive_val")
+        has_external_val = (
+            self.X_val is not None
+            and self.y_val is not None
+            and sensitive_val is not None
         )
+        if has_external_val:
+            (
+                X_fit,
+                y_fit,
+                g_fit,
+                X_val_t,
+                y_val_t,
+                g_val,
+            ) = self._prepare_external_validation_split(g_train_idx, sensitive_val)
+        else:
+            if not (0.0 < self.val_fraction < 1.0):
+                raise ValueError("val_fraction must be strictly between 0 and 1")
+            (
+                X_fit,
+                y_fit,
+                g_fit,
+                X_val_t,
+                y_val_t,
+                g_val,
+            ) = self._prepare_fit_and_val_splits(g_train_idx)
+
         if X_fit.shape[0] == 0 or X_val_t.shape[0] == 0:
             raise ValueError("No hay suficientes datos tras construir train/val para DRO")
 

@@ -18,7 +18,7 @@ class FairMethod(ABC):
         return hyperparams
 
     @abstractmethod
-    def load_data(self, X_train, y_train, X_test):
+    def load_data(self, X_train, y_train, X_test, X_val=None, y_val=None):
         raise NotImplementedError
 
     @abstractmethod

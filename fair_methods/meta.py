@@ -63,7 +63,7 @@ class MetaLearning(FairMethod):
             predict_batch_size=self.predict_batch_size,
         )
 
-    def load_data(self, X_train, y_train, X_test):
+    def load_data(self, X_train, y_train, X_test, X_val=None, y_val=None):
         # Keep datasets on CPU to avoid duplicating large tensors in VRAM.
         self.X_train = X_train.float().cpu()
         self.y_train = y_train.float().cpu()
