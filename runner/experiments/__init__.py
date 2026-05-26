@@ -3,10 +3,11 @@ import importlib
 
 AVAILABLE_EXPERIMENTS = {
     "folktables_full": "runner.experiments.folktables_full:FolktablesFullExperiment",
-    "folktables_nine_states": (
-        "runner.experiments.folktables_nine_states:FolktablesNineStatesExperiment"
-    ),
-    "example_toy": "runner.experiments.example_toy:ExampleToyExperiment",
+    "folktables_nine_states": "runner.experiments.folktables_nine_states:FolktablesNineStatesExperiment",
+    "disent_imbalanced_2classes": "runner.experiments.disent_imbalanced_2classes:ExampleToyExperiment",
+    "disent_balanced_2classes": "runner.experiments.disent_balanced_2classes:ExampleToyExperiment",
+    "ent_imbalanced_2classes": "runner.experiments.ent_imbalanced_2classes:ExampleToyExperiment",
+    "ent_balanced_2classes": "runner.experiments.ent_balanced_2classes:ExampleToyExperiment",
 }
 
 

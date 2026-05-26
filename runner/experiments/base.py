@@ -82,10 +82,17 @@ class Experiment(ABC):
         y_test,
         sensitive_train,
         sensitive_test,
+        X_val=None,
+        y_val=None,
+        sensitive_val=None,
         threshold=0.5,
         store_predictions=False,
         X_train_full=None,
         X_test_full=None,
+        X_val_full=None,
+        X_train_onehot=None,
+        X_test_onehot=None,
+        X_val_onehot=None,
         model_class=None,
     ):
         results = run_fairtests(
@@ -101,6 +108,13 @@ class Experiment(ABC):
             seed=self.seed,
             X_train_full=X_train_full,
             X_test_full=X_test_full,
+            X_val=X_val,
+            y_val=y_val,
+            sensitive_val=sensitive_val,
+            X_val_full=X_val_full,
+            X_train_onehot=X_train_onehot,
+            X_test_onehot=X_test_onehot,
+            X_val_onehot=X_val_onehot,
             model_class=model_class,
         )
         return results, get_hyperparams()
