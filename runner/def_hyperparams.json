@@ -26,22 +26,22 @@
     "predict_batch_size": 8192
   },
   "maml": {
-    "inner_lr": 0.005,
-    "inner_steps": 5,
-    "meta_epochs": 150,
+    "inner_lr": 0.01,
+    "inner_steps": 10,
+    "meta_epochs": 500,
     "meta_lr": 0.0003,
     "k_support": 128,
     "k_query": 128,
     "replace": false,
     "group_budget_divisor": 4,
     "support_fraction": 0.3333333333333333,
-    "use_full_data": false,
+    "use_full_data": true,
     "predict_batch_size": 8192
   },
   "reptile": {
-    "inner_lr": 0.005,
+    "inner_lr": 0.01,
     "inner_steps": 10,
-    "meta_epochs": 200,
+    "meta_epochs": 500,
     "meta_lr": 0.003,
     "meta_lr_final": 0.003,
     "inner_batch_size": 128,
